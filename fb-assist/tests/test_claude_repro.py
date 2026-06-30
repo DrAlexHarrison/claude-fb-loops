@@ -313,6 +313,7 @@ class _FakeInnerMessages:
 
 
 def _wire_fake_client():
+    pytest.importorskip("anthropic")  # ReportingClient needs the [api] extra
     client = CR.ReportingClient(api_key="test-key", report_buffer=3)
     client.messages._inner = _FakeInnerMessages()
     return client
@@ -365,6 +366,7 @@ def test_streaming_capture_uses_stream_request_id_header():
     class _FakeInnerWithStream(_FakeInnerMessages):
         def stream(self, **kwargs): return _FakeStreamMgr()
 
+    pytest.importorskip("anthropic")  # ReportingClient needs the [api] extra
     client = CR.ReportingClient(api_key="test-key")
     client.messages._inner = _FakeInnerWithStream()
     with client.messages.stream(model="claude-x", max_tokens=8,
