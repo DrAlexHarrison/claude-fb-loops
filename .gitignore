@@ -1,0 +1,51 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Generated synthetic test fixtures (built on demand by conftest / `make fixtures`) ---
+# These are large, deterministic, and fully synthetic — never committed.
+fb-assist/tests/fixtures/sample-mid.jsonl
+fb-assist/tests/fixtures/sample-large.jsonl
+
+# --- fb-os local artifacts ---
+fb-os/build/
+*.db
+*.db-wal
+*.db-shm
+
+# --- Editor / OS noise ---
+*.bak
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# --- PRIVACY HARD-EXCLUDES — never let private data into this repo ---
+# Real Claude Code transcripts, exports, captures, evidence. The whole point of
+# this project is that these never leak; the .gitignore is a second line of
+# defense behind the clean-room layout + the scrub-gate (`make scrub-gate`).
+**/claude-ai-export/
+**/conversations.json
+*.pcap
+*.har
+mon-inotify.log
+inotify-proof.txt
+.claude/settings.local.json
+# ...but DO ship the pps-pipeline synthetic demo capture (creator "pps-fixture",
+# api.example.com — no real data; also regenerable via `make -C pps-pipeline fixture`).
+!pps-pipeline/fixtures/session-demo/network.har

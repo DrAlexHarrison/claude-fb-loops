@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fb-assist"
+version = "0.1.0"
+description = "A privacy-preserving feedback co-author for Claude — redact, gate, and ship feedback through Anthropic's real /feedback intake without leaking secrets, PII, or company IP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Alex Harrison" }]
+keywords = ["claude", "feedback", "privacy", "redaction", "mcp", "anthropic"]
+
+# Core runtime: the detection/redaction stack + the in-session MCP server.
+# (gitleaks/trufflehog are Go binaries installed separately; see RUNTIME.md.)
+dependencies = [
+    "presidio-analyzer",
+    "presidio-anonymizer",
+    "gliner",
+    "detect-secrets",
+    "mcp>=1.2.0",
+]
+
+[project.optional-dependencies]
+# Voice push-to-talk confirm (Super+V). Local faster-whisper, CPU.
+voice = ["faster-whisper", "sounddevice"]
+# The claude-repro API SDK surface (Build B).
+api = ["anthropic>=0.40"]
+dev = ["pytest>=8"]
+all = ["fb-assist[voice,api,dev]"]
+
+[project.scripts]
+# Library CLIs (already implemented in the three core modules).
+fb-transcripts = "fb_assist.transcripts:main"
+fb-redact = "fb_assist.redact:main"
+fb-package = "fb_assist.package:main"
+# The fb-assist MCP server entrypoint (registered in ~/.claude.json).
+fb-assist-mcp = "fb_assist.mcp_server:main"
+
+[tool.setuptools]
+packages = ["fb_assist"]
+
+[tool.setuptools.package-data]
+fb_assist = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# NOTE: transformers' TensorFlow path breaks under Keras 3 (no tf-keras). The
+# modules force USE_TF=0 defensively at import and the tests set it too, so no
+# pytest-env plugin is required; CI also exports USE_TF=0.

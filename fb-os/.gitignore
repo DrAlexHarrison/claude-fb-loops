@@ -1,0 +1,16 @@
+# build + demo artifacts
+build/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+dist/
+
+# dashboards
+dashboards/metabase/plugins/

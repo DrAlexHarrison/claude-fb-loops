@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fb-loops.example/fb-os/artifact.schema.json",
+  "title": "artifact.json",
+  "description": "The inbound bundle manifest (Build 3 stage_review -> Build 1 ingest). Additive: ingest tolerates its absence and derives every field from description.txt + effort-signal.json + *.jsonl.",
+  "type": "object",
+  "required": ["schema_version", "artifact_id"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "type": "string" },
+    "artifact_id": { "type": "string", "minLength": 1 },
+    "surface": { "type": "string", "enum": ["cli", "ide", "claude.ai", "api", "cowork"] },
+    "created_at": { "type": "string" },
+    "session_ids": { "type": "array", "items": { "type": "string" } },
+    "description_ref": { "type": "string" },
+    "transcript_refs": { "type": "array", "items": { "type": "string" } },
+    "report_only": { "type": "boolean" },
+    "answers_question_id": { "type": ["string", "null"] },
+    "effort_signal": {
+      "type": "object",
+      "description": "EXACT shape package._render_effort_footer consumes (reused, not redefined).",
+      "additionalProperties": true,
+      "properties": {
+        "redaction": { "type": ["string", "null"] },
+        "quality": { "type": ["integer", "string", "null"] },
+        "alignment_confidence": { "type": ["number", "string", "null"] },
+        "reputation_token": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://fb-loops.example/pps/package.schema.json",
+  "title": "InterleavedPackage",
+  "description": "The packager output — what Claude actually reads. TEXT ONLY: no image/video bytes anywhere. A single, strictly time-ordered, source-referenced timeline.",
+  "type": "object",
+  "required": ["schema_version", "session_id", "chunking", "redaction", "timeline"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "chunking": {
+      "type": "object",
+      "required": ["mode", "chunk_count"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["event_boundary", "fixed"] },
+        "chunk_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
+    "redaction": {
+      "type": "object",
+      "required": ["applied", "floor_clean"],
+      "properties": {
+        "applied": { "type": "boolean" },
+        "floor_clean": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    },
+    "timeline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["t", "kind", "text", "source"],
+      "properties": {
+        "t": { "type": "number", "minimum": 0, "description": "seconds from session t0" },
+        "kind": {
+          "type": "string",
+          "enum": ["prompt", "caption", "speech", "tool_call", "tool_result", "net", "event"]
+        },
+        "text": {
+          "type": "string",
+          "description": "short, redacted, text-only. NEVER raw image/video bytes."
+        },
+        "source": { "type": "string", "description": "provenance ref for evidence citation" },
+        "chunk": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}

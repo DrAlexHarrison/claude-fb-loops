@@ -1,0 +1,122 @@
+[
+  {
+    "uuid": "11111111-1111-4111-8111-111111111111",
+    "name": "Feedback flow keeps freezing on submit",
+    "summary": "User reports the /feedback flow freezing; debugging an auth token leak.",
+    "account": {"uuid": "acct-0000-aaaa", "email_address": "synthetic-user@example.com"},
+    "created_at": "2026-06-20T14:01:00.000000Z",
+    "updated_at": "2026-06-20T14:42:00.000000Z",
+    "chat_messages": [
+      {
+        "uuid": "msg-1a-human-content-array",
+        "sender": "human",
+        "created_at": "2026-06-20T14:01:00.000000Z",
+        "updated_at": "2026-06-20T14:01:00.000000Z",
+        "parent_message_uuid": "00000000-0000-4000-8000-000000000000",
+        "content": [
+          {
+            "type": "text",
+            "text": "The /feedback flow keeps FREEZING when I hit submit. I'm logged in with my key sk-ant-api03-AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLLMMMMNNNNOOOO and my email is dana.reed@contoso-labs.com. Reach me at 415-555-0182.",
+            "citations": []
+          }
+        ],
+        "text": "",
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "msg-1b-assistant-content-array",
+        "sender": "assistant",
+        "created_at": "2026-06-20T14:02:10.000000Z",
+        "updated_at": "2026-06-20T14:02:10.000000Z",
+        "parent_message_uuid": "msg-1a-human-content-array",
+        "content": [
+          {"type": "thinking", "text": "The user pasted a live-looking key; I must not echo it."},
+          {
+            "type": "text",
+            "text": "Thanks — the freeze on submit is reproducible. Before we go further, that looks like a real Anthropic key in your message; please rotate it. I'll connect to the AWS account AKIAIOSFODNN7EXAMPLE from us-east-1 to check the queue.",
+            "citations": []
+          }
+        ],
+        "text": "",
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "msg-1c-human-bare-text",
+        "sender": "human",
+        "created_at": "2026-06-20T14:10:00.000000Z",
+        "updated_at": "2026-06-20T14:10:00.000000Z",
+        "parent_message_uuid": "msg-1b-assistant-content-array",
+        "content": [],
+        "text": "Rotated. My SSN for the support ticket is 123-45-6789 and the box is at 10.0.0.42. The repo lives at /home/dana/code/contoso-internal/billing.",
+        "attachments": [
+          {"file_name": "trace.log", "file_size": 2048, "file_type": "text/plain", "extracted_content": "panic: token=ghp_AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH1234 at startup"}
+        ],
+        "files": []
+      },
+      {
+        "uuid": "msg-1d-assistant-bare-text",
+        "sender": "assistant",
+        "created_at": "2026-06-20T14:11:30.000000Z",
+        "updated_at": "2026-06-20T14:11:30.000000Z",
+        "parent_message_uuid": "msg-1c-human-bare-text",
+        "content": [],
+        "text": "Got it. The freeze is the submit handler blocking on a slow network call; I'll file it. I won't keep your SSN or the internal path.",
+        "attachments": [],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "22222222-2222-4222-8222-222222222222",
+    "name": "Untitled",
+    "summary": "",
+    "account": {"uuid": "acct-0000-aaaa"},
+    "created_at": "2026-06-21T09:00:00.000000Z",
+    "updated_at": "2026-06-21T09:05:00.000000Z",
+    "chat_messages": [
+      {
+        "uuid": "msg-2a-human",
+        "sender": "human",
+        "created_at": "2026-06-21T09:00:00.000000Z",
+        "updated_at": "2026-06-21T09:00:00.000000Z",
+        "parent_message_uuid": "00000000-0000-4000-8000-000000000001",
+        "content": [{"type": "text", "text": "Quick question about ICU pluralization in the app — no secrets here.", "citations": []}],
+        "text": "",
+        "attachments": [],
+        "files": []
+      },
+      {
+        "uuid": "msg-2b-assistant",
+        "sender": "assistant",
+        "created_at": "2026-06-21T09:01:00.000000Z",
+        "updated_at": "2026-06-21T09:01:00.000000Z",
+        "parent_message_uuid": "msg-2a-human",
+        "content": [],
+        "text": "Sure — ICU MessageFormat handles plural categories (one/other). Nothing sensitive to redact here.",
+        "attachments": [],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "33333333-3333-4333-8333-333333333333",
+    "name": "Stripe webhook retry storm",
+    "summary": "Webhook retries hammering the endpoint; shared a test key.",
+    "account": {"uuid": "acct-0000-aaaa"},
+    "created_at": "2026-06-22T18:00:00.000000Z",
+    "updated_at": "2026-06-22T18:20:00.000000Z",
+    "chat_messages": [
+      {
+        "uuid": "msg-3a-human",
+        "sender": "human",
+        "created_at": "2026-06-22T18:00:00.000000Z",
+        "updated_at": "2026-06-22T18:00:00.000000Z",
+        "parent_message_uuid": "00000000-0000-4000-8000-000000000002",
+        "content": [],
+        "text": "Webhooks retry forever. Here's the test key sk_test_FAKEfbassist0001 and contact ops@example.org."
+      }
+    ]
+  }
+]

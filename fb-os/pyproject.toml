@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fb-os"
+version = "0.1.0"
+description = "Feedback OS (Build 1) — the org-wide feedback loop: ingest distilled artifacts, cluster them locally (Clio-style), triage them with an internal Claude, and publish the living open-questions.json the CLI consumes. Closes the loop, free + local."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Alex Harrison" }]
+keywords = ["claude", "anthropic", "feedback", "clustering", "triage", "clio", "open-questions"]
+
+# CORE runtime: ZERO heavy dependencies. The runnable core + `make demo` + tests use
+# only the stdlib (sqlite3), fb_assist (the sibling Build 3 package), and — if present
+# — jsonschema for schema validation (a stdlib structural fallback is built in). The
+# embedder/clusterer ship a deterministic stdlib fallback, so nothing downloads.
+dependencies = [
+    "fb-assist",          # local sibling package (see [tool.uv.sources] / install -e ../fb-assist)
+]
+
+[project.optional-dependencies]
+# Schema validation via jsonschema (present in most envs; stdlib fallback otherwise).
+schema = ["jsonschema>=4"]
+# PRODUCTION embeddings/clustering — the documented "real" path (heavy downloads).
+# The core never needs these; they upgrade the fallbacks behind --backend / env flags.
+embed = ["sentence-transformers>=2.2"]
+cluster = ["bertopic>=0.16", "umap-learn", "hdbscan", "scikit-learn"]
+# PRODUCTION vector store — Postgres + pgvector (FB_OS_STORE_BACKEND=postgres). The
+# zero-infra core is stdlib sqlite3 + JSON embeddings + pure-Python cosine.
+postgres = ["psycopg[binary]>=3", "pgvector"]
+# Near-duplicate detection at scale (the core uses a cosine-threshold dedup).
+dedup = ["datasketch"]
+dev = ["pytest>=8"]
+all = ["fb-os[schema,embed,cluster,postgres,dedup,dev]"]
+
+[project.scripts]
+fb-os = "fb_os.cli:main"
+
+[tool.setuptools]
+packages = ["fb_os"]
+
+[tool.setuptools.package-data]
+fb_os = ["schema/*.json", "prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

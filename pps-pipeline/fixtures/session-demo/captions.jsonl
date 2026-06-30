@@ -1,0 +1,4 @@
+{"t": 13.0, "text": "VS Code open on auth.ts, terminal split to the right"}
+{"t": 49.0, "text": "terminal shows 3 failing tests in red"}
+{"t": 71.0, "text": "terminal shows .env contents; profile tab open with email jane.doe@example.com"}
+{"t": 159.0, "text": "terminal shows all tests passing in green"}

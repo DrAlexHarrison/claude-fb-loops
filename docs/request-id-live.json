@@ -1,0 +1,22 @@
+{
+  "anthropic_version": "0.76.0",
+  "model": "claude-3-5-haiku-latest",
+  "timestamp": "2026-06-30T03:59:41Z",
+  "message_model_fields": [
+    "id",
+    "content",
+    "model",
+    "role",
+    "stop_reason",
+    "stop_sequence",
+    "type",
+    "usage"
+  ],
+  "request_id_in_model_fields": false,
+  "create_error": {
+    "status_code": 400,
+    "error_request_id": "req_011CcYmw6apDW1kzQt8gvW6x",
+    "error_request_id_starts_with_req_": true,
+    "message": "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}, 'request_id': 'req_011CcYmw6apDW1kzQt8gvW6x'}"
+  }
+}

@@ -1,0 +1,26 @@
+# Metabase dashboard for the Feedback OS — the INTERNAL / "real" visibility path.
+#
+# This is intentionally NOT required by the public demo: Metabase is AGPL, and the
+# committed static-HTML dashboard (`fb-os metrics --html`) covers the zero-infra demo
+# with no server. Stand this up only for the internal pitch / production path.
+#
+#   docker compose -f dashboards/metabase/docker-compose.yml up -d
+#   open http://localhost:3000  → add the feedback-os SQLite/Postgres as a database
+#
+# Pre-seed questions (time-to-triage, signal-quality, question-turnover) against the
+# `artifacts` / `clusters` / `triage` / `questions` tables fb_os.store creates.
+services:
+  metabase:
+    image: metabase/metabase:latest
+    container_name: fb-os-metabase
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_TYPE: h2
+      # Mount the demo SQLite store read-only so Metabase can query the same tables
+      # the core writes (or point MB at the Postgres backend for the production path).
+      MB_PLUGINS_DIR: /plugins
+    volumes:
+      - ./plugins:/plugins
+      - ../../build/demo:/data:ro
+    restart: unless-stopped

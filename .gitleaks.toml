@@ -1,0 +1,32 @@
+title = "claude-fb-loops — gitleaks config"
+
+# Extend gitleaks' default ruleset; we only ADD an allowlist for the deliberately
+# planted, fully-synthetic secrets that exercise the detectors. None are real
+# credentials. The point of the project is detecting secrets, so the corpus is
+# full of fake ones by design — this keeps the repo-self scan green without
+# weakening detection of a genuinely real key committed anywhere else.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic planted test/demo secrets (no real credentials)."
+
+# The synthetic secrets live only in the test corpus, the runnable example, and the
+# README demo snippet. Allow those locations.
+paths = [
+  '''fb-assist/tests/.*''',
+  '''fb-assist/examples/.*''',
+  '''.*/fixtures/.*''',
+  '''^README\.md$''',
+]
+
+# Belt-and-braces: the exact fake tokens / token shapes used as plants, so even a
+# stray copy outside the allow-listed paths stays green.
+regexes = [
+  '''AKIAIOSFODNN7EXAMPLE''',
+  '''AKIAZZ44QQ55WW66EE77''',
+  '''AKIA2E4Z7QF9KD3MXR8T''',
+  '''sk-ant-api03-[A-Za-z0-9]+''',
+  '''ghp_(?:AAAA|ABCDEF|a1B2c3)[A-Za-z0-9]+''',
+  '''sk_test_FAKEfbassist[0-9]+''',
+]

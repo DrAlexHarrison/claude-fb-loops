@@ -1,0 +1,47 @@
+claude-fb-loops
+Copyright 2026 Alex Harrison
+
+This product includes software developed by Alex Harrison.
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+================================================================================
+Dependency license posture
+================================================================================
+
+The three packages in this repository (fb-assist, fb-os, pps-pipeline) have a
+deliberately light, permissively-licensed dependency surface. The runnable core
+of each package is stdlib-only and degrades gracefully when optional heavy
+dependencies are absent.
+
+Optional Python dependencies and their licenses (all permissive):
+
+  presidio-analyzer / presidio-anonymizer   MIT        (PII detection)
+  gliner                                     Apache-2.0 (NER PII detection)
+  detect-secrets                             Apache-2.0 (secret detection)
+  spaCy + en_core_web_sm                     MIT        (NER backbone)
+  mcp (Model Context Protocol SDK)           MIT        (in-session server)
+  anthropic (SDK)                            MIT        (claude-repro API surface)
+  faster-whisper                             MIT        (optional voice confirm)
+  jsonschema                                 MIT        (schema validation)
+  sentence-transformers / bertopic / hdbscan MIT/BSD    (optional fb-os clustering)
+
+External binaries (invoked only if already installed; NEITHER bundled NOR a
+dependency):
+
+  gitleaks    MIT      — optional secret scanner; shelled out to if on PATH.
+  trufflehog  AGPL-3.0 — optional secret scanner; shelled out to ONLY as a
+                         pre-installed external binary. It is never bundled,
+                         never imported, and never a Python/packaging
+                         dependency, so its AGPL terms do not attach to this
+                         work. The regex secret floor + gitleaks cover the
+                         secret-detection layer without it.
+
+================================================================================
+A note on the test corpus
+================================================================================
+
+The large test fixtures (fb-assist/tests/fixtures/sample-mid.jsonl and
+sample-large.jsonl) are FULLY SYNTHETIC, deterministically generated at test
+time by tests/fixtures/generate_fixtures.py. No real Claude Code session, user
+prompt, file content, path, or credential ships in this repository. See
+`make scrub-gate`.

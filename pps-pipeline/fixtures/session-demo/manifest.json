@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0",
+  "session_id": "pps_2026-06-29_cand07",
+  "t0_epoch": 1782000000.0,
+  "duration_s": 200.0,
+  "consent": {
+    "obtained": true,
+    "scope": "work-observation",
+    "ref": "consent.txt"
+  },
+  "streams": {
+    "video": {
+      "ref": "video.mkv",
+      "fps": 30,
+      "present": false
+    },
+    "transcript": {
+      "ref": "transcript.jsonl",
+      "engine": "faster-whisper",
+      "present": true,
+      "time_base": "offset"
+    },
+    "captions": {
+      "ref": "captions.jsonl",
+      "present": true,
+      "time_base": "offset"
+    },
+    "network": {
+      "ref": "network.har",
+      "present": true,
+      "time_base": "iso"
+    },
+    "ccode_session": {
+      "ref": "session.jsonl",
+      "present": true,
+      "time_base": "iso"
+    },
+    "events": {
+      "ref": "events.jsonl",
+      "present": false,
+      "time_base": "offset"
+    }
+  },
+  "redaction": {
+    "applied": false
+  }
+}

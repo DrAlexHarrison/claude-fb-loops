@@ -1,0 +1,14 @@
+# Light lint config — keep the floor low so the suite stays the source of truth.
+target-version = "py310"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I"]
+# E501 (line length) is advisory here; the prose-heavy modules wrap at ~100 but a
+# few data literals run long. F401/F811 etc. stay on.
+ignore = ["E501"]
+
+[lint.per-file-ignores]
+# Tests deliberately build planted-secret strings and long data literals.
+"**/tests/**" = ["E501", "F841"]
+"**/fixtures/**" = ["E501"]

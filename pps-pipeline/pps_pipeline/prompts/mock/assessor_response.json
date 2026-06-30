@@ -1,0 +1,59 @@
+{
+  "rubric_version": "pps-default-1.0",
+  "dimensions": [
+    {
+      "name": "debugging_approach",
+      "score": 4,
+      "evidence": [
+        { "t": 48.0, "quote": "tests: 3 failed, 18 passed" },
+        { "t": 50.0, "quote": "three tests failing, the signature must have changed" }
+      ],
+      "rationale": "Read the failing-test output, then formed a specific hypothesis about the changed util signature before editing — no shotgun changes."
+    },
+    {
+      "name": "tool_fluency",
+      "score": 5,
+      "evidence": [
+        { "t": 12.0, "quote": "Read: auth.ts" },
+        { "t": 35.0, "quote": "Edit: auth.ts" }
+      ],
+      "rationale": "Fluent read-then-edit loop on the target file; minimal wasted motion between inspecting and changing the code."
+    },
+    {
+      "name": "decision_quality",
+      "score": 3,
+      "evidence": [
+        { "t": 70.0, "quote": "Bash: cat .env" }
+      ],
+      "rationale": "Generally sound progress, but dumping .env to inspect a secret was an unnecessary credential exposure — a hygiene lapse under time pressure."
+    },
+    {
+      "name": "verification_rigor",
+      "score": 4,
+      "evidence": [
+        { "t": 140.0, "quote": "Bash: npm test" },
+        { "t": 158.0, "quote": "tests: 21 passed" }
+      ],
+      "rationale": "Ran the full suite to confirm green before considering the work done, rather than trusting the earlier targeted run."
+    },
+    {
+      "name": "communication",
+      "score": 4,
+      "evidence": [
+        { "t": 14.0, "quote": "ok the token util signature changed, let me read the file first" }
+      ],
+      "rationale": "Narrated intent clearly and concurrently, so the plan was easy to follow."
+    }
+  ],
+  "strengths": [
+    "hypothesis-first debugging",
+    "tight read-edit-test loop",
+    "verified with the full suite before declaring done"
+  ],
+  "gaps": [
+    "exposed .env contents to inspect a secret",
+    "could have confirmed the util signature before the first edit"
+  ],
+  "overall": "Strong, methodical practitioner: reads failures, forms specific hypotheses, and verifies with the full suite. One secrets-hygiene lapse (cat .env) is the main thing to coach.",
+  "confidence": 0.78
+}

@@ -1,0 +1,53 @@
+{
+  "_comment": "Canned triager responses (record/replay) for the --mock backend. Keyed by cluster_signature (sorted top-4 keywords). Hand-vetted; this is what `make demo` and the golden test replay so CI is FREE + DETERMINISTIC (no live Claude call). A signature not found here falls back to fb_os.triager._heuristic_decision so the loop still closes.",
+  "by_signature": {
+    "attach|feedback|one|session": {
+      "theme": { "summary": "Users want to attach ONE specific past session to /feedback by scope, not a coarse time window — a privacy need on sensitive/shared code." },
+      "artifact_triage": { "category": "feature_request", "route": "product", "priority": 0.7 },
+      "per_artifact": {},
+      "question": {
+        "question": "Are you also wishing /feedback could attach a single past session by scope, instead of only a time window?",
+        "hypothesis": "Users on sensitive or shared code want per-session attach scope, not just a 24h/7d window.",
+        "keywords": ["/feedback", "attach", "scope", "session", "window", "privacy"],
+        "surfaces": ["cli", "ide"],
+        "uncertainty": 0.71
+      }
+    },
+    "aggressive|harmless|less|redaction": {
+      "theme": { "summary": "Redaction is firing on harmless output (bash results, public URLs, error text) — users feel it strips too much and want per-category control." },
+      "artifact_triage": { "category": "ux_friction", "route": "product", "priority": 0.6 },
+      "per_artifact": {},
+      "question": {
+        "question": "When redaction masked something, was it actually harmless output you'd have been fine sharing?",
+        "hypothesis": "The redaction floor over-strips harmless content; per-category tuning would raise feedback usefulness without lowering safety.",
+        "keywords": ["redaction", "aggressive", "strip", "mask", "output", "tune"],
+        "surfaces": ["cli", "ide"],
+        "uncertainty": 0.6
+      }
+    },
+    "capture|offer|prompts|watcher": {
+      "theme": { "summary": "The proactive watcher prompts to capture feedback too often; users want a single quiet offer per session that remembers a dismissal." },
+      "artifact_triage": { "category": "ux_friction", "route": "design", "priority": 0.55 },
+      "per_artifact": {},
+      "question": {
+        "question": "Would a single 'capture this?' offer per session (silent after you dismiss it) feel right, instead of repeated prompts?",
+        "hypothesis": "One quiet, dismissable offer per session removes the nag without losing the high-signal moments.",
+        "keywords": ["watcher", "prompt", "nag", "offer", "once", "dismiss"],
+        "surfaces": ["cli", "ide"],
+        "uncertainty": 0.55
+      }
+    },
+    "confirm|latency|transcription|voice": {
+      "theme": { "summary": "The Super+V voice-confirm has noticeable latency between keypress and transcription, breaking flow." },
+      "artifact_triage": { "category": "performance", "route": "engineering", "priority": 0.65 },
+      "per_artifact": {},
+      "question": {
+        "question": "Is the lag between pressing Super+V and seeing the transcription the main thing slowing your voice-confirm flow?",
+        "hypothesis": "Local whisper transcription latency is the dominant friction in the voice-confirm path.",
+        "keywords": ["voice", "confirm", "latency", "transcription", "super+v", "slow"],
+        "surfaces": ["cli", "ide"],
+        "uncertainty": 0.5
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{"start": 14.0, "end": 18.0, "text": "ok the token util signature changed, let me read the file first"}
+{"start": 50.0, "end": 54.0, "text": "three tests failing, the signature must have changed"}
+{"start": 73.0, "end": 76.0, "text": "oh I shouldn't have catted the env, anyway moving on"}
+{"start": 112.0, "end": 116.0, "text": "good, green now, let me run the whole suite to be sure"}
