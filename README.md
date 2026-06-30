@@ -110,7 +110,7 @@ mid-submit.
 
 ```bash
 make setup      # one-time: installs the NER stack + spaCy model (HEAVY — banner warns)
-make test       # 375 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline)
+make test       # 377 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline)
 make scrub-gate # asserts ZERO real personal data in tracked files
 ```
 
@@ -155,7 +155,7 @@ the user's disk (rewriteable before send) or server-side (not). What's in this r
 
 | Surface | Module | Mechanism |
 |---|---|---|
-| **CLI / IDE** (keystone) | `fb_assist/` + `skill/fb/` + `mcp_server.py` | in-session `/fb` morph → swap-restore around the real `/feedback` |
+| **CLI / IDE** (keystone) | `fb-assist/` + `fb-assist/skill/fb/` + `mcp_server.py` | in-session `/fb` morph → swap-restore around the real `/feedback` |
 | **API / Console** | `claude_repro.py` | forward-transform SDK; ties each report to its `request-id` |
 | **claude.ai export** | `desktop_chat.py` | co-pilot over an exported `conversations.json` — genericize + effort-signal, ToS-clean |
 | **claude.ai / VS Code thumbs** | `server_side.py` | reference consent-genericize gate for the *referenced* (not inlined) feedback POST |
@@ -176,7 +176,7 @@ catalogued in [`GAPS.md`](GAPS.md).
 git clone <this-repo> && cd claude-fb-loops
 make demo            # offline, no install, no downloads
 make setup           # install the full NER stack (heavy; see banner) to run the suite
-make test            # 375 + 46 + 48 tests
+make test            # 377 + 46 + 48 tests
 make scrub-gate      # check that no personal data ships
 ```
 

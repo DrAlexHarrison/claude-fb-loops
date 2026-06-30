@@ -279,6 +279,25 @@ def test_recover_noop_when_empty(tmp_path):
     assert P.recover(tmp_path / "does-not-exist") == []
 
 
+def test_recover_only_paths_leaves_other_sessions(tmp_path):
+    """#3: a scoped recover restores only journals that swap a given path — it must not
+    un-swap a concurrent session's still-staged journal (the S2 restart-restore edge)."""
+    shared_bk = tmp_path / "bk"
+    a = tmp_path / "sessA.jsonl"; a.write_bytes(b"ORIG-A\n")
+    b = tmp_path / "sessB.jsonl"; b.write_bytes(b"ORIG-B\n")
+    P.begin_swap({str(a): b"SAN-A\n"}, backup_root=shared_bk)   # "crashed" — never finished
+    P.begin_swap({str(b): b"SAN-B\n"}, backup_root=shared_bk)   # concurrent, still staged
+    assert a.read_bytes() == b"SAN-A\n" and b.read_bytes() == b"SAN-B\n"
+
+    res = P.recover(shared_bk, only_paths={str(a)})
+    assert any(r["status"] == "restored" for r in res)
+    assert a.read_bytes() == b"ORIG-A\n"   # A restored
+    assert b.read_bytes() == b"SAN-B\n"    # B left intact for its own owner
+
+    P.recover(shared_bk, only_paths={str(b)})
+    assert b.read_bytes() == b"ORIG-B\n"
+
+
 # --------------------------------------------------------------------------- #
 # Two-phase swap: begin_swap / finish_swap (the in-session /feedback straddle)  #
 # --------------------------------------------------------------------------- #

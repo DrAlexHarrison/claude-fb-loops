@@ -24,6 +24,8 @@ download-free demo (`make demo`).
 | `claude_repro.py` | the API-surface SDK: Messages request/response → redacted repro + `request-id` anchor |
 | `desktop_chat.py` | claude.ai export co-pilot (genericize an exported `conversations.json`) |
 | `server_side.py` | reference consent-genericize gate for referenced-not-inlined feedback |
+| `cowork.py` | Cowork-surface adapter (locate/strip/redact the bundled `audit.jsonl` shape) |
+| `reputation.py` | pseudonymous careful-filterer trust token (Ed25519; weights an opted-in contributor's signal) |
 
 `prompts/co-author.md` is the co-author "how to be"; `skill/fb/` is the `/fb` skill +
 mirror; `voice/` is the optional push-to-talk confirm; `INTEGRATION.md` is the validated
@@ -38,7 +40,7 @@ make -C .. demo
 # Full install (heavy NER stack; see banner) to run the suite:
 pip install -e .
 python -m spacy download en_core_web_sm
-USE_TF=0 pytest -q            # 264 tests
+USE_TF=0 pytest -q            # 377 tests
 ```
 
 Heavy detectors are function-local and guarded — with nothing extra installed the package
@@ -48,8 +50,9 @@ defensively and the suite/CI export it.
 
 ## Console scripts
 
-`fb-transcripts`, `fb-redact`, `fb-package`, `fb-locate`, `fb-assist-mcp` — each is the
-argparse CLI over the matching module.
+Core: `fb-transcripts`, `fb-redact`, `fb-package`, `fb-assist-mcp`. Per-surface (each with
+a built-in `demo` / default fixture): `claude-repro`, `fb-desktop-chat`, `fb-server-side`,
+`fb-cowork`. Each is the argparse CLI over the matching module.
 
 Apache-2.0. **Best-effort redaction aid, not a guarantee** — always review the preview
 before sending.

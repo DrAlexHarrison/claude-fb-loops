@@ -548,8 +548,10 @@ def begin_swap(
     batch_dir = Path(tempfile.mkdtemp(prefix="swap-", dir=backup_root))
     try:
         for entry in entries:
-            with open(entry.real_path, "rb") as f:
-                original = f.read()
+            # S4: reuse the phase-1 bytes (which `original_sha256` was computed from)
+            # instead of re-reading — a re-read could capture changed bytes whose hash
+            # won't match, trapping the original in the .bak and failing restore.
+            original = originals_by_path[entry.real_path]
             bp = batch_dir / (hashlib.sha1(entry.real_path.encode()).hexdigest() + ".bak")
             _atomic_write(bp, original)
             entry.backup_path = str(bp)
@@ -662,13 +664,18 @@ def swap_restore(
         finish_swap(handle.journal_path, raise_on_failure=True)
 
 
-def recover(backup_root: Optional[PathLike] = None, *, dry_run: bool = False) -> list[dict]:
+def recover(backup_root: Optional[PathLike] = None, *, dry_run: bool = False,
+            only_paths: Optional[Iterable[PathLike]] = None) -> list[dict]:
     """Restore any orphaned swaps left by a crash, from their durable journals.
 
     Scans ``backup_root`` for ``journal-*.json`` (including in per-batch subdirs),
     restores each entry's original from its backup, verifies byte-exact, undoes any
     journaled windowing mtimes, and on success removes the batch. Idempotent and
     safe to run anytime.
+
+    ``only_paths`` (optional) restricts recovery to journals that swap at least one of
+    those real paths — so a single session's post-restart restore can't un-swap a
+    *concurrent* session's still-staged journal (a global startup heal passes None).
 
     Returns a list of per-journal result dicts. ``dry_run=True`` reports what
     *would* be restored without touching anything.
@@ -677,14 +684,21 @@ def recover(backup_root: Optional[PathLike] = None, *, dry_run: bool = False) ->
     results: list[dict] = []
     if not root.exists():
         return results
+    only = {os.fspath(p) for p in only_paths} if only_paths is not None else None
 
     journals = sorted(root.glob("**/journal-*.json"))
     for jp in journals:
         try:
             data = json.loads(jp.read_text())
         except Exception as e:  # noqa: BLE001
-            results.append({"journal": str(jp), "status": "unreadable", "error": str(e)})
+            if only is None:
+                results.append({"journal": str(jp), "status": "unreadable", "error": str(e)})
             continue
+
+        if only is not None:
+            entry_paths = {d.get("real_path") for d in data.get("entries", [])}
+            if not (entry_paths & only):
+                continue  # another session's journal — leave it for its owner to finish
 
         if dry_run:
             restored = [d.get("real_path") for d in data.get("entries", [])]
@@ -753,9 +767,35 @@ class PreviewSummary:
     def bytes_saved(self) -> int:
         return self.bytes_before - self.bytes_after
 
+    # Plain-English names for the common redaction categories, for the headline.
+    _PLAIN = {
+        "ANTHROPIC_KEY": "Anthropic key", "AWS_ACCESS_KEY": "AWS key", "GITHUB_TOKEN": "GitHub token",
+        "GITHUB_PAT": "GitHub token", "OPENAI_KEY": "OpenAI key", "STRIPE_KEY": "Stripe key",
+        "GCP_API_KEY": "Google key", "GOOGLE_OAUTH": "Google token", "SLACK_TOKEN": "Slack token",
+        "PRIVATE_KEY": "private key", "JWT": "token", "EMAIL_ADDRESS": "email", "PERSON": "name",
+        "IP_ADDRESS": "IP", "US_SSN": "SSN", "PHONE_NUMBER": "phone", "FS_PATH": "path",
+        "ORGANIZATION": "org name", "LOCATION": "location", "CODENAME": "codename",
+        "IP_CODENAME": "codename", "CREDIT_CARD": "card number",
+    }
+
+    def _plain(self, cat: str) -> str:
+        return self._PLAIN.get(cat, cat.replace("_", " ").lower())
+
+    def headline(self) -> str:
+        """One plain-English line: what's sent + what was removed (the gist a tired user
+        reads first; the structured block below has the detail)."""
+        kept = self.kept_records
+        bits = sorted(self.stripped_by_category.items(), key=lambda kv: -kv[1])
+        removed = ", ".join(f"{n} {self._plain(c)}{'' if n == 1 else 's'}" for c, n in bits[:4])
+        sess = f" across {self.sessions} sessions" if self.sessions != 1 else ""
+        tail = f" — removed {removed}" if removed else " — nothing sensitive found"
+        if self.dropped_records:
+            tail += f"; dropped {self.dropped_records} bulk record{'' if self.dropped_records == 1 else 's'}"
+        return f"Sending {kept} cleaned record{'' if kept == 1 else 's'}{sess}{tail}."
+
     def render(self, max_samples: int = 5) -> str:
         pct = (100 * self.bytes_saved / self.bytes_before) if self.bytes_before else 0.0
-        lines = ["Feedback bundle — what will be sent:"]
+        lines = [self.headline(), "", "Feedback bundle — what will be sent:"]
         lines.append(
             f"  INCLUDED : {self.kept_records} records"
             + (f" across {self.sessions} sessions" if self.sessions != 1 else "")

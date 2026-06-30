@@ -3,8 +3,8 @@
 `/fb` is an **in-session** feedback co-author for Claude Code (same window, multi-turn, like `/interview`). Invoking it loads the co-author "how to be" and gives the live Claude a privacy toolbox (the `fb-assist` MCP server) so it can redact secrets / PII / company-IP out of your transcript and ship clean feedback through Anthropic's **real** `/feedback` intake — **non-destructively** (your originals come back byte-exact, even across a crash).
 
 ## What you get
-- **`/fb` skill** — `~/.claude/skills/fb/SKILL.md` (+ `co-author.md`, the brain). Mirrored in the repo at `skill/fb/`.
-- **`fb-assist` MCP server** — `fb_assist/mcp_server.py`, 19 model-invocable tools (`mcp__fb-assist__*`): locate, see, detect, redact, genericize-verify, assemble, preview, the two-layer leak gate, the two-phase submit handoff, the set-once profile.
+- **`/fb` skill** — `~/.claude/skills/fb/SKILL.md` (+ `co-author.md`, the brain). Mirrored in the repo at `fb-assist/skill/fb/`.
+- **`fb-assist` MCP server** — `fb_assist/mcp_server.py`, 20 model-invocable tools (`mcp__fb-assist__*`): locate, see, detect, redact, genericize-verify, distill, assemble, preview, the two-layer leak gate, the two-phase submit handoff, the set-once profile, and the open-questions reader.
 - **watcher hook** — `fb_assist/watcher.py`, offers a one-tap `/fb` on high-precision frustration/delight moments.
 
 ## Install (clean clone)

@@ -57,6 +57,7 @@ not a single tool:
 | **`claude-repro` (API)** | reaches the segment (Bedrock/Vertex, regulated devs) that can't paste a session at all; adds the `request-id` provenance anchor. |
 | **`desktop_chat` export co-pilot** | brings claude.ai conversations into the loop via the user's own export, not by scraping. |
 | **`server_side.py`** | for surfaces where the conversation is referenced-not-inlined (claude.ai thumbs, VS Code per-message), the gap can only close on Anthropic's side, so this is a runnable reference rather than a deployed feature. |
+| **`cowork.py`** | the Cowork edge — the same strip + gate against the bundled local-agent-mode `audit.jsonl` shape; reference until the intake wire is known. |
 | **`fb-os`** | the org-side half of the loop: captured signal becomes prioritized questions and back-propagates to users. |
 | **`pps-pipeline`** | the same privacy-preserving capture discipline applied to a different observation problem. |
 

@@ -461,6 +461,21 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
     info = L.resolve(cwd=s.cwd)
     live_id = live_session_id or info.get("live_session_id")
     live_path = L.resolve(cwd=s.cwd, session_id=live_id).get("path") if live_id else None
+
+    # FAIL-CLOSED: if we can't positively identify the live session, we can't prove what
+    # /feedback would co-upload — and begin_swap's FIX-3 identity refusal is also disabled
+    # without a live id. Don't assume clean (the cardinal-failure direction); recommend
+    # checkpoint or an explicit override. The skill should pass live_session_id.
+    if not live_id and not allow_live_gate:
+        return {
+            "staged": False,
+            "reason": "couldn't identify the live session to scan what /feedback would co-upload",
+            "recommend": "pass live_session_id=<fresh $CLAUDE_CODE_SESSION_ID>, or checkpoint "
+                         "(/clear, then submit from the thin session), or allow_live_gate=True "
+                         "if you are certain no live session will co-upload.",
+            "gather_floor_clean": False,
+        }
+
     live_contrib: dict = {"path": None, "floor_clean": True}
     if live_path and os.path.isfile(live_path) and live_path not in s.payload.targets:
         live_text = Path(live_path).read_text(encoding="utf-8", errors="replace")
@@ -514,17 +529,23 @@ def submit_finish(session_id: str, cwd: Optional[str] = None) -> dict:
     (``finish_swap``). Idempotent.
 
     S2 — if the in-memory journal path is gone (the MCP server restarted mid-flow),
-    fall back to ``package.recover()``, which scans the durable backup root and restores
-    any dangling swap from disk. Data was never at risk (the journal is durable), but
-    this restores the user's real transcript *now* instead of leaving the sanitized stub
-    on disk until the next ``/fb`` startup runs ``recover_orphans``."""
+    fall back to ``package.recover()`` SCOPED to this session's transcript path, so it
+    restores THIS swap now without un-swapping a concurrent ``/fb`` flow's still-staged
+    journal. Data was never at risk (the journal is durable); this just restores the
+    user's real transcript immediately instead of waiting for the next ``/fb`` startup.
+    If the session's path can't be resolved, we do NOT blanket-recover (that could
+    un-swap someone else) — recover_orphans() on the next startup heals it safely."""
     s = _session(session_id, cwd)
     if not s.journal_path:
-        healed = P.recover()
+        if not s.path:
+            return {"restored": False,
+                    "error": "no staged swap for this session, and its transcript path "
+                             "couldn't be resolved to scope a recover (try recover_orphans)."}
+        healed = P.recover(only_paths={s.path})
         restored = [h for h in healed if h.get("status") == "restored"]
         if restored:
             return {"restored": True, "via": "recover", "healed": restored,
-                    "note": "restored from a durable journal after a server restart"}
+                    "note": "restored this session's swap from its durable journal after a restart"}
         return {"restored": False, "error": "no staged swap for this session (submit_begin first)"}
     report = P.finish_swap(s.journal_path, raise_on_failure=False)
     s.journal_path = None if report.ok else s.journal_path

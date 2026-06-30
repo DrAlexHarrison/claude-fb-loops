@@ -134,8 +134,9 @@ def test_assemble_bundles_extra_sessions(seeded, tmp_path):
         assert s not in extra_bytes, f"extra-session LEAK: {s}"
 
     # submit_begin swaps BOTH targets to sanitized; submit_finish restores BOTH.
+    # (allow_live_gate: the hermetic fixture has no separate live session to scan.)
     orig_primary, orig_extra = primary.read_bytes(), extra.read_bytes()
-    sb = M.submit_begin(sid)
+    sb = M.submit_begin(sid, allow_live_gate=True)
     assert sb["staged"] is True
     assert set(sb["swapped_targets"]) == {str(primary), str(extra)}
     during = extra.read_text()
@@ -175,7 +176,8 @@ def test_submit_begin_finish_nondestructive(seeded):
     original = path.read_bytes()
     M.redact_recipe(sid, {"profile_apply": False})
     M.assemble(sid, "freeze on submit")
-    sb = M.submit_begin(sid)
+    # allow_live_gate: the hermetic fixture exposes no separate live session to scan.
+    sb = M.submit_begin(sid, allow_live_gate=True)
     assert sb["staged"] is True and Path(sb["journal_path"]).exists()
     during = path.read_bytes()
     for s in SENTINELS:
@@ -226,6 +228,20 @@ def test_submit_begin_refuses_content_rich_live_session(seeded, monkeypatch, tmp
     assert "checkpoint" in sb["recommend"]
     cats = sb["live_session_contribution"]["by_category"]
     assert any(c in cats for c in ("path", "env_metadata")), cats
+    assert path.read_bytes()  # nothing swapped
+
+
+def test_submit_begin_fails_closed_when_live_unresolved(seeded):
+    """#2: when no live session id can be resolved (skill didn't pass it AND no env id),
+    submit_begin must NOT assume the live session is clean — it fails closed and asks for
+    the id or a checkpoint, rather than staging an unscanned raw co-upload."""
+    sid, path, _ = seeded  # the seeded fixture's resolve returns live_session_id=None
+    M.redact_recipe(sid, {"profile_apply": False})
+    M.assemble(sid, "freeze")
+    sb = M.submit_begin(sid)  # no live_session_id, no allow_live_gate
+    assert sb["staged"] is False
+    assert sb["gather_floor_clean"] is False
+    assert "identify the live session" in sb["reason"]
     assert path.read_bytes()  # nothing swapped
 
 

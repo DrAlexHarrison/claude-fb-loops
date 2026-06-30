@@ -29,6 +29,8 @@ os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("USE_FLAX", "0")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+# Keep the "Fetching N files" snapshot-download bar out of demo/CLI output.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
 
 import argparse
 import copy
