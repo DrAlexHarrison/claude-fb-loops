@@ -27,8 +27,9 @@ download-free demo (`make demo`).
 | `cowork.py` | Cowork-surface adapter (locate/strip/redact the bundled `audit.jsonl` shape) |
 | `reputation.py` | pseudonymous careful-filterer trust token (Ed25519; weights an opted-in contributor's signal) |
 
-`prompts/co-author.md` is the co-author "how to be"; `skill/fb/` is the `/fb` skill +
-mirror; `voice/` is the optional push-to-talk confirm; `INTEGRATION.md` is the validated
+`prompts/co-author.md` is the co-author "how to be"; `skill/fb/` (here under `fb-assist/`)
+is the shipped `/fb` skill + its mirror of that prompt; `voice/` is the optional
+push-to-talk confirm + the summon/quick-panel helpers; `INTEGRATION.md` is the validated
 call-sequence playbook; `RUNTIME.md` is the in-session wiring.
 
 ## Install / run

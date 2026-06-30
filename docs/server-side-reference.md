@@ -32,7 +32,7 @@ decisive:
   at the moment feedback is captured, *before* the stored copy is attached to a
   feedback record an engineer will later read.
 
-The referenced **message UUID** is the ungameable anchor here — exactly analogous to
+The referenced **message UUID** is the verifiable anchor here — exactly analogous to
 the Messages-API `request-id`. It ties the report to a real stored message with zero
 extra user content.
 
