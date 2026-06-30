@@ -94,6 +94,69 @@ def test_redact_and_assemble_strip_sentinels(seeded):
         assert s not in up, f"LEAK through server: {s}"
 
 
+_EXTRA_SID = "extra000-aaaa-bbbb-cccc-ddddeeeeffff"
+_EXTRA_PLANTED = {
+    "key": "sk-ant-api03-EXTRA9999SESSION8888BBBB7777AAAA6666",
+    "email": "harper.quinn@northwind-labs.example",
+}
+
+
+def _extra_records() -> list[dict]:
+    return [
+        {"type": "ai-title", "aiTitle": "second run", "sessionId": _EXTRA_SID},
+        {"uuid": "x1", "parentUuid": None, "type": "user", "isSidechain": False,
+         "sessionId": _EXTRA_SID, "timestamp": "2026-06-28T18:00:00.000Z",
+         "message": {"role": "user", "content": (
+             f"Earlier run: mail {_EXTRA_PLANTED['email']}, key {_EXTRA_PLANTED['key']}. "
+             "Same submit-freeze symptom.")}},
+    ]
+
+
+def test_assemble_bundles_extra_sessions(seeded, tmp_path):
+    """#4 — extra_sessions are parsed, redacted, and bundled alongside the primary;
+    every bundled session is sanitized and counted, and the swap covers them all."""
+    sid, primary, _ = seeded
+    extra = tmp_path / f"{_EXTRA_SID}.jsonl"
+    extra.write_bytes(P.serialize_records(_extra_records()))
+
+    a = M.assemble(sid, "freeze on submit, two runs", extra_sessions=[str(extra)])
+
+    # Both sessions made the bundle, counted, and reported.
+    assert str(primary) in a["targets"] and str(extra) in a["targets"]
+    assert a["sessions"] == 2
+    assert a["primary"] == str(primary)
+    inc = [e for e in a["extra_sessions"] if e["included"]]
+    assert len(inc) == 1 and inc[0]["path"] == str(extra)
+
+    # The extra session's sentinels are stripped in the on-disk payload bytes.
+    extra_bytes = M._STATE[sid].payload.targets[str(extra)].decode("utf-8")
+    for s in _EXTRA_PLANTED.values():
+        assert s not in extra_bytes, f"extra-session LEAK: {s}"
+
+    # submit_begin swaps BOTH targets to sanitized; submit_finish restores BOTH.
+    orig_primary, orig_extra = primary.read_bytes(), extra.read_bytes()
+    sb = M.submit_begin(sid)
+    assert sb["staged"] is True
+    assert set(sb["swapped_targets"]) == {str(primary), str(extra)}
+    during = extra.read_text()
+    for s in _EXTRA_PLANTED.values():
+        assert s not in during
+    assert M.submit_finish(sid)["restored"] is True
+    assert primary.read_bytes() == orig_primary and extra.read_bytes() == orig_extra
+
+
+def test_assemble_reports_unresolved_extra(seeded, tmp_path, monkeypatch):
+    """An extra that resolves to no on-disk file is reported, never silently dropped."""
+    sid, primary, _ = seeded
+    # A non-existent session id resolves to no file (override the fixture's stub,
+    # which otherwise points every id at the primary).
+    monkeypatch.setattr(M.L, "resolve", lambda cwd=None, session_id=None: {"path": None})
+    a = M.assemble(sid, "freeze", extra_sessions=["ghost-session-0000"])
+    assert a["sessions"] == 1 and list(a["targets"]) == [str(primary)]
+    assert a["extra_sessions"][0]["included"] is False
+    assert a["extra_sessions"][0]["reason"] == "unresolved"
+
+
 def test_preview_and_gate(seeded):
     sid, _, _ = seeded
     M.redact_recipe(sid, {"profile_apply": False})

@@ -52,7 +52,7 @@ from pathlib import Path
 from typing import Iterable, Union
 
 from .package import is_being_written
-from .transcripts import find_transcripts
+from .transcripts import find_transcripts, project_slug
 
 __all__ = [
     "slugify_cwd",
@@ -77,8 +77,9 @@ _ACCOUNTS = {
 # --------------------------------------------------------------------------- #
 def slugify_cwd(cwd: PathLike) -> str:
     """Slugify a working directory the way Claude Code names its project dir:
-    every ``/`` becomes ``-`` (mirrors ``transcripts.find_transcripts``)."""
-    return str(cwd).replace("/", "-")
+    every non-``[A-Za-z0-9-]`` char becomes ``-`` (portable across Linux/macOS/
+    Windows). Single source of truth: :func:`transcripts.project_slug`."""
+    return project_slug(cwd)
 
 
 def config_dir() -> Path:

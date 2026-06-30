@@ -269,13 +269,43 @@ def distill_range(session_id: str, start_idx: int, end_idx: int, summary: str,
 # --------------------------------------------------------------------------- #
 # Assemble / Preview / Gate                                                    #
 # --------------------------------------------------------------------------- #
+def _prepare_extra(identifier: str, cwd: Optional[str]) -> Optional[dict]:
+    """Resolve+parse+redact ONE extra session for a multi-session bundle (#4 / spec §5).
+
+    ``identifier`` is either a path to a ``.jsonl`` transcript or a ``session_id``
+    (resolved against ``cwd``). Runs the SAME proven redaction recipe as the primary
+    (profile-aware) so every bundled session ships sanitized. Returns
+    ``{path, sanitized, originals}`` or ``None`` if it can't be resolved to a file."""
+    if os.path.isfile(identifier):
+        path: Optional[str] = identifier
+    else:
+        info = L.resolve(cwd=cwd, session_id=identifier)
+        path = info.get("path")
+    if not path or not os.path.isfile(path):
+        return None
+    parsed = PL.parse_session(path)
+    allow = deny = None
+    resolved = PROF.resolve(cwd, repo_root=cwd)
+    ents = resolved.get("entities", {}) or {}
+    allow = ents.get("allow") or None
+    deny = ents.get("deny") or None
+    red = PL.redact_recipe(parsed.raws, allow=allow, deny=deny)
+    return {"path": path, "sanitized": red["sanitized_raws"], "originals": parsed.raws}
+
+
 def assemble(session_id: str, description: str, effort_signal: Optional[dict] = None,
-             cwd: Optional[str] = None) -> dict:
+             cwd: Optional[str] = None, extra_sessions: Optional[list] = None) -> dict:
     """Build the on-disk payload under the 1 MB budget + the concise gate preview
     (``pipeline.assemble_and_preview``). Stores the Payload in session state.
 
-    NOTE: bundles the PRIMARY session (the common one-session case, spec §5).
-    Multi-session bundling is a documented v-next item."""
+    Bundles the PRIMARY session (the common case, spec §5) and, when given,
+    ``extra_sessions`` — a list of session_ids or transcript paths to bundle ALONGSIDE
+    it (spec §5 "the related runs"). Every extra is parsed + redacted with the same
+    proven recipe; ``budget_pack`` then fits the set under the 1 MB cap newest-first,
+    so the primary (most recent) is never starved by older extras — anything that
+    doesn't fit is reported in ``over_budget`` and aged OUT-of-window by submit_begin.
+    ``submit_begin`` swaps every selected target, so the native ``/feedback`` gather
+    picks up exactly the sanitized bundle."""
     s = _session(session_id, cwd)
     parsed = _ensure_parsed(s)
     if s.sanitized_raws is None:
@@ -284,9 +314,26 @@ def assemble(session_id: str, description: str, effort_signal: Optional[dict] = 
         s.sanitized_raws, s.redaction_map = red["sanitized_raws"], red["redaction_map"]
     s.description = description
     s.effort_signal = effort_signal
+
+    targets: dict[str, list] = {s.path: s.sanitized_raws}
+    originals: dict[str, list] = {s.path: parsed.raws}
+    extras_report: list[dict] = []
+    for ident in (extra_sessions or []):
+        prepared = _prepare_extra(ident, cwd or s.cwd)
+        if prepared is None:
+            extras_report.append({"identifier": ident, "included": False, "reason": "unresolved"})
+            continue
+        if prepared["path"] in targets:
+            extras_report.append({"identifier": ident, "path": prepared["path"],
+                                  "included": False, "reason": "duplicate"})
+            continue
+        targets[prepared["path"]] = prepared["sanitized"]
+        originals[prepared["path"]] = prepared["originals"]
+        extras_report.append({"identifier": ident, "path": prepared["path"], "included": True})
+
     ap = PL.assemble_and_preview(
-        description, {s.path: s.sanitized_raws},
-        originals={s.path: parsed.raws}, redaction_map=s.redaction_map or [],
+        description, targets,
+        originals=originals, redaction_map=s.redaction_map or [],
         effort_signal=effort_signal,
     )
     s.payload, s.preview = ap["payload"], ap["preview"]
@@ -295,6 +342,8 @@ def assemble(session_id: str, description: str, effort_signal: Optional[dict] = 
         "total_bytes": ap["total_bytes"],
         "over_budget": ap["over_budget"],
         "sessions": s.payload.sessions,
+        "extra_sessions": extras_report,
+        "primary": s.path,
     }
 
 

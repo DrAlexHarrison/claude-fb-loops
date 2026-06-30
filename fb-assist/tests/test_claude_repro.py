@@ -170,7 +170,7 @@ def test_narrative_spans_locate_all_categories():
 
 
 # --------------------------------------------------------------------------- #
-# FIX 5 — the ungameable request-id anchor
+# FIX 5 — the verifiable request-id anchor
 # --------------------------------------------------------------------------- #
 class _FakeMessage:
     """Mimics an SDK Message: the public per-response `_request_id` attribute that

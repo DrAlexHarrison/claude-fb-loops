@@ -254,6 +254,45 @@ def test_reversible_tokenize_is_consistent_and_reversible():
 
 
 # --------------------------------------------------------------------------- #
+# Value-consistent masking (#11): a partial-detection twin must not survive
+# --------------------------------------------------------------------------- #
+def test_value_consistent_masking_catches_undetected_twins():
+    """The leak class NER causes: a detector flags ONE occurrence of a repeated
+    value and misses an identical one. apply_redactions must mask EVERY literal
+    occurrence of any detected value — making the byte-level egress gate (and the
+    server_side sentinel test) order-independent regardless of which span NER
+    happened to return."""
+    text = "Ping Jordan Castellano now, then ask Jordan Castellano again — Jordan Castellano knows."
+    # Simulate NER returning only the MIDDLE occurrence (the found-one-missed-twins case).
+    mid = text.index("Jordan Castellano", text.index("Jordan Castellano") + 1)
+    one = redact.Finding("presidio", "pii", "PERSON", "Jordan Castellano",
+                         mid, mid + len("Jordan Castellano"), 0.9, "medium")
+    masked, _ = redact.apply_redactions(text, [one], style="mask")
+    assert "Jordan Castellano" not in masked, masked
+    assert masked.count("‹PERSON›") == 3, masked
+
+
+def test_value_consistent_masking_respects_token_boundaries():
+    """Propagation must not bleed a short detected value into a larger legit token
+    ('John' must never corrupt 'Johnson')."""
+    text = "John reviewed Johnson's PR, then John merged it."
+    one = redact.Finding("gliner", "pii", "person", "John", 0, 4, 0.9, "medium")
+    masked, _ = redact.apply_redactions(text, [one], style="mask")
+    assert "Johnson" in masked, masked          # larger token preserved
+    assert "John " not in masked                # both standalone Johns masked
+    assert masked.count("‹PERSON›") == 2, masked
+
+
+def test_value_consistent_masking_can_be_disabled():
+    """The expansion is the safe default but opt-out-able for callers that want
+    only the literally-detected spans (e.g. exact diff-count parity)."""
+    text = "Dana and Dana and Dana"
+    one = redact.Finding("gliner", "pii", "person", "Dana", 0, 4, 0.9, "medium")
+    masked, _ = redact.apply_redactions(text, [one], style="mask", value_consistent=False)
+    assert masked.count("Dana") == 2 and masked.count("‹PERSON›") == 1, masked
+
+
+# --------------------------------------------------------------------------- #
 # strip_categories tests (on a COPY of the real fixture)
 # --------------------------------------------------------------------------- #
 _FIXTURE_CACHE: list | None = None

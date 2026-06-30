@@ -151,13 +151,16 @@ def _atomic_write(path: PathLike, data: bytes, *, mtime: Optional[float] = None)
         if mtime is not None:
             os.utime(tmp, (mtime, mtime))
         os.replace(tmp, path)
-        # Best-effort directory fsync so the rename itself is durable.
-        with contextlib.suppress(OSError):
-            dfd = os.open(directory, os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
+        # Best-effort directory fsync so the rename itself is durable. POSIX-only:
+        # Windows has no os.O_DIRECTORY (and can't fsync a directory handle), while
+        # os.replace is already atomic there — so skip rather than raise AttributeError.
+        if hasattr(os, "O_DIRECTORY"):
+            with contextlib.suppress(OSError):
+                dfd = os.open(directory, os.O_DIRECTORY)
+                try:
+                    os.fsync(dfd)
+                finally:
+                    os.close(dfd)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(tmp)

@@ -640,7 +640,7 @@ class CoworkFeedbackSink(Protocol):
 @dataclass
 class CoworkFeedbackEvent:
     """One Cowork feedback submission. The anchor is the ``session_id`` (+ optional
-    ``turn_uuid`` of the message under feedback) — the ungameable reference, the
+    ``turn_uuid`` of the message under feedback) — the verifiable reference, the
     Cowork analogue of the Messages-API ``request-id`` / claude.ai message-UUID."""
     session_id: str
     turn_uuid: str = ""

@@ -64,7 +64,7 @@ sanitized version. fb-assist's swap-restore does exactly this, non-destructively
 crash-safely — proven by the suite's byte-exact restore and `os._exit` mid-swap recovery
 tests.
 
-## Honest caveats
+## Caveats
 
 - The post-redaction **submit** (vs. gather) wasn't captured with a clean second Feedback
   ID, purely due to TUI-automation flakiness on a polluted session — not a technical

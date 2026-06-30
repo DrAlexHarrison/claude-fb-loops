@@ -97,6 +97,16 @@ def test_atomic_write_sets_content_and_mtime(tmp_path):
     assert not list(tmp_path.glob(".fbassist-tmp-*"))
 
 
+def test_atomic_write_works_without_o_directory(tmp_path, monkeypatch):
+    """Windows has no os.O_DIRECTORY (and can't fsync a dir handle); the write must
+    still succeed by skipping the best-effort directory fsync, not raise."""
+    monkeypatch.delattr(os, "O_DIRECTORY", raising=False)
+    p = tmp_path / "win.bin"
+    P._atomic_write(p, b"on-windows")
+    assert p.read_bytes() == b"on-windows"
+    assert not list(tmp_path.glob(".fbassist-tmp-*"))
+
+
 # --------------------------------------------------------------------------- #
 # swap_restore — the load-bearing safety core                                 #
 # --------------------------------------------------------------------------- #

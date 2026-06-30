@@ -1,27 +1,26 @@
 # claude-fb-loops
 
-**A privacy-preserving feedback co-author for Claude — and the platform around it.**
+A privacy-preserving feedback co-author for Claude, with the per-surface and
+org-side pieces around it.
 
-Claude Code's `/feedback` is the highest-bandwidth signal a user can send Anthropic:
-the *actual session* — prompts, thinking, tool calls, file contents — attached to a
-bug report. It is also the feedback people **don't** send, because that session
-contains secrets, PII, customer data, and proprietary code. The built-in redaction
-strips **API keys only**; everything else uploads verbatim and is retained for five
-years. So the most valuable feedback is the feedback that never gets sent.
+Claude Code's `/feedback` can attach the actual session — prompts, thinking, tool
+calls, file contents — to a bug report. That transcript is also what stops people
+from sending it: it can contain secrets, PII, customer data, and proprietary code.
+The built-in redaction strips API keys only; everything else uploads verbatim and is
+retained for five years.
 
-`fb-assist` closes that gap **inside the session you're already in**. It reads the
-transcript, helps you say the bug precisely, lets you decide exactly what's private,
-and ships only what you confirmed — through Anthropic's **real** `/feedback` intake,
-**non-destructively**: it swaps a sanitized copy onto disk for the submit, then
-restores your original byte-for-byte.
+`fb-assist` works inside the session you're already in. It reads the transcript,
+helps you describe the bug, lets you decide what's private, and ships only what you
+confirm — through Anthropic's real `/feedback` intake, non-destructively: it swaps a
+sanitized copy onto disk for the submit, then restores your original byte-for-byte.
 
-> This repo is a working reference built for Anthropic's *Product Operations Manager,
-> Feedback Loops* role. The code is the argument; the strategy is in
-> [`STRATEGY.md`](STRATEGY.md); the honest scorecard is in [`GAPS.md`](GAPS.md).
+This repo is a reference implementation built for Anthropic's *Product Operations
+Manager, Feedback Loops* role. The design rationale is in [`STRATEGY.md`](STRATEGY.md);
+the parity ledger of what is and isn't done is in [`GAPS.md`](GAPS.md).
 
 ---
 
-## ▶ See it work (download-free, offline, ~2 seconds)
+## Demo (download-free, offline, ~2 seconds)
 
 ```bash
 make demo
@@ -29,7 +28,7 @@ make demo
 
 It plants a live-looking `sk-ant-…` key, an `AKIA…` key, a GitHub token, an email, an
 SSN, an IP, and an absolute path into a schema-faithful session — across a human
-prompt, a Read file body, and a Bash stdout — then runs the validated flow:
+prompt, a Read file body, and a Bash stdout — then runs the flow:
 
 ```
 [ BEFORE ]  the human turn as it sits on disk (secrets visible):
@@ -54,52 +53,53 @@ prompt, a Read file body, and a Bash stdout — then runs the validated flow:
 RESULT: GREEN — fb-assist redacted the session end-to-end.
 ```
 
-The hard guarantees (every planted secret/PII/path absent from the **actual upload
-bytes**, original restored byte-exact) come from a **deterministic floor** — regex +
+Every planted secret/PII/path is absent from the actual upload bytes, and the original
+is restored byte-exact. Those guarantees come from a deterministic floor — regex +
 structural strips + a crash-safe swap-restore — so the demo runs on a bare interpreter
-with **no model downloads and no network**. If the optional NER stack is installed it
-additionally masks the person name; that's a bonus, never the gate.
+with no model downloads and no network. With the optional NER stack installed it also
+masks the person name; that pass is additive and never the gate.
 
 ---
 
-## Why this is a real integration, not a mock
+## How the integration works
 
-The mechanism rests on one **empirically verified** fact: `/feedback` reads the
-**on-disk** transcript at submit time, so rewriting that file before you submit changes
-what Anthropic receives. This was confirmed three ways against the real, shipping
-command (full method in [`docs/verification.md`](docs/verification.md)):
+The mechanism rests on one verified fact: `/feedback` reads the on-disk transcript at
+submit time, so rewriting that file before you submit changes what Anthropic receives.
+This was confirmed three ways against the real, shipping command (full method in
+[`docs/verification.md`](docs/verification.md)):
 
 - **Filesystem** (decisive): `inotify` caught `/feedback` `OPEN→ACCESS→CLOSE` on the
   on-disk past-session `.jsonl`; after redacting that same file in place, the next
-  gather read the redacted bytes from the same path. Same path, two different
-  contents, both pulled into the bundle — **the on-disk file is the source of truth.**
+  gather read the redacted bytes from the same path. Same path, two different contents,
+  both pulled into the bundle.
 - **Network**: `tcpdump` captured the TLS submit to `api.anthropic.com`; the submit
-  returned a real Feedback ID.
+  returned a Feedback ID.
 - **Code**: the binary's gather path (`fDl → Akf → Tkf`) corroborates both.
 
-And the confirmation screen states the payload verbatim — *"Environment info … Git
-repo metadata … Session transcript: this session + this project's other sessions from
-the last 7 days"* — confirming exactly the leak surface fb-assist targets.
+The confirmation screen states the payload verbatim — *"Environment info … Git repo
+metadata … Session transcript: this session + this project's other sessions from the
+last 7 days"* — which matches the surface fb-assist redacts.
 
-So fb-assist is **upstream of the real intake**: it shapes the input the shipping tool
-already consumes. The swap is **non-destructive and crash-safe** — a durable journal +
-backups mean even a hard kill mid-submit restores your original on the next run.
+fb-assist therefore operates upstream of the real intake: it shapes the input the
+shipping tool already consumes. The swap is non-destructive and crash-safe — a durable
+journal plus backups restore the original on the next run even after a hard kill
+mid-submit.
 
 ---
 
-## The proof floor: tests
+## Tests
 
 ```bash
 make setup      # one-time: installs the NER stack + spaCy model (HEAVY — banner warns)
-make test       # 264 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline) — all green
+make test       # 370 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline)
 make scrub-gate # asserts ZERO real personal data in tracked files
 ```
 
-- **264 fb-assist tests** cover the parser/extractors, the detector recall floor, the
+- The fb-assist tests cover the parser/extractors, the detector recall floor, the
   swap-restore safety core (including a real `os._exit` mid-swap crash-recovery test),
   the two-layer egress gate over the actual upload bytes, the API SDK, and the
   server-side reference.
-- The large fixtures the suite runs on are **fully synthetic and deterministic** —
+- The large fixtures the suite runs on are fully synthetic and deterministic —
   generated at test time by `fb-assist/tests/fixtures/generate_fixtures.py`. No real
   Claude Code session, prompt, path, or credential ships in this repo; the
   `make scrub-gate` check (also a CI gate) enforces it.
@@ -122,47 +122,31 @@ make scrub-gate # asserts ZERO real personal data in tracked files
                 composed by the in-session co-author (the /fb skill)
 ```
 
-Heavy detectors are function-local and guarded, so the package **degrades to a
-stdlib regex floor** with zero heavy deps installed — which is what makes `make demo`
-download-free and offline.
+Heavy detectors are function-local and guarded, so the package degrades to a stdlib
+regex floor with no heavy deps installed — which is what makes `make demo` download-free
+and offline.
 
 ---
 
-## One platform, every surface
+## Surfaces
 
-The job is "one shared platform every surface plugs into." The principle that picks the
-mechanism is **transcript locus** — is the conversation on the user's disk
-(rewriteable before send) or server-side (not)? One surface-agnostic core, a thin
-per-surface edge. What's in this repo:
+The design goal is one shared core that each surface plugs into. The factor that picks
+the mechanism per surface is **transcript locus** — whether the conversation sits on
+the user's disk (rewriteable before send) or server-side (not). What's in this repo:
 
 | Surface | Module | Mechanism |
 |---|---|---|
 | **CLI / IDE** (keystone) | `fb_assist/` + `skill/fb/` + `mcp_server.py` | in-session `/fb` morph → swap-restore around the real `/feedback` |
-| **API / Console** | `claude_repro.py` | forward-transform SDK; ties each report to its real `request-id` (the ungameable anchor) |
+| **API / Console** | `claude_repro.py` | forward-transform SDK; ties each report to its `request-id` |
 | **claude.ai export** | `desktop_chat.py` | co-pilot over an exported `conversations.json` — genericize + effort-signal, ToS-clean |
 | **claude.ai / VS Code thumbs** | `server_side.py` | reference consent-genericize gate for the *referenced* (not inlined) feedback POST |
 | **Org-wide loop** | `fb-os/` | ingest distilled artifacts → cluster (Clio-style) → triage → publish `open-questions.json` |
 | **Work-observation** | `pps-pipeline/` | recorded session → interleaved, redacted, text-only package + cited assessment |
 
-Every surface emits the **same effort-signal + artifact schema** — that sameness *is*
-the "one platform" claim. The surfaces that **can't** close client-side are built as
-**extensible reference seams** Anthropic can adopt, and are catalogued honestly in
-[`GAPS.md`](GAPS.md).
-
----
-
-## The pitch, in three anchors
-
-1. **Anthropic already committed to building this.** The Sept-2025 postmortem: *"We'll
-   develop infrastructure and tooling to better debug community-sourced feedback
-   without sacrificing user privacy"* — and named privacy controls as the blocker to
-   examining problematic interactions. A repro the user **voluntarily** scrubs and
-   sends is that unlock, in Anthropic's own words.
-2. **The `request-id` is an ungameable anchor.** `claude-repro` ties every API report
-   to a real metered call Anthropic can verify against its own 7-day server log — high
-   signal, zero extra user content.
-3. **One effort-signal + artifact schema across every surface** is the literal
-   "one platform every surface plugs into" the role asks for.
+Every surface emits the same effort-signal + artifact schema, so feedback from any
+entry point lands in one triage queue with one quality bar. The surfaces that can't
+close client-side are built as reference seams Anthropic could adopt, and are
+catalogued in [`GAPS.md`](GAPS.md).
 
 ---
 
@@ -170,10 +154,10 @@ the "one platform" claim. The surfaces that **can't** close client-side are buil
 
 ```bash
 git clone <this-repo> && cd claude-fb-loops
-make demo            # offline, no install, no downloads — watch redaction happen
+make demo            # offline, no install, no downloads
 make setup           # install the full NER stack (heavy; see banner) to run the suite
-make test            # 264 + 46 + 48 tests
-make scrub-gate      # prove no personal data ships
+make test            # 370 + 46 + 48 tests
+make scrub-gate      # check that no personal data ships
 ```
 
 Requires Python ≥ 3.10. `make demo` needs nothing but the standard library.
@@ -188,14 +172,14 @@ fb-assist/      keystone package — transcripts/redact/package + claude_repro,
                 mcp_server; the /fb skill + co-author prompt; the voice confirm.
 fb-os/          Feedback OS (org-wide ingest/cluster/triage loop).
 pps-pipeline/   work-observation interview packager + assessment.
-docs/           DESIGN, verification (the empirical proof), the per-surface refs.
-GAPS.md         the honest parity ledger — what's proven, closeable, or a seam.
-STRATEGY.md     why each surface ties to the role + the mission.
+docs/           design notes, verification (the empirical proof), the per-surface refs.
+GAPS.md         parity ledger — what's proven, closeable, or a reference seam.
+STRATEGY.md     how each surface maps to the role.
 ```
 
-## License & posture
+## License
 
-Apache-2.0 (explicit patent grant). fb-assist is a **best-effort redaction aid, not a
-guarantee** — always review the preview before sending. Every dependency is permissive;
+Apache-2.0 (explicit patent grant). fb-assist is a best-effort redaction aid, not a
+guarantee — always review the preview before sending. Every dependency is permissive;
 AGPL `trufflehog` is invoked only as an optional pre-installed external binary, never
 bundled or depended on (see [`NOTICE`](NOTICE)). Personal project by Alex Harrison.

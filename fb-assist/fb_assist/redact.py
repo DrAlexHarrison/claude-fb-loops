@@ -481,16 +481,84 @@ def _token_label(entity: str) -> str:
     return re.sub(r"[^A-Z0-9]+", "_", entity.upper()).strip("_") or "REDACTED"
 
 
+# A detected value shorter than this is NOT propagated to its other literal
+# occurrences (a 1-3 char fragment matching elsewhere is coincidence, not a
+# recovered secret). Mirrors genericize._MIN_SURVIVING_LEN.
+_VALUE_CONSISTENT_MIN_LEN = 4
+_ASCII_WORD = frozenset("0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+
+
+def _occurrence_regex(value: str) -> "re.Pattern":
+    """A boundary-guarded literal matcher for `value`. Guards a word-char edge so
+    masking a detected name ("John") never bleeds into a larger legit token
+    ("Johnson"); a non-word edge (emails, paths, keys) needs no guard."""
+    pat = re.escape(value)
+    pre = r"(?<![0-9A-Za-z_])" if value[:1] in _ASCII_WORD else ""
+    post = r"(?![0-9A-Za-z_])" if value[-1:] in _ASCII_WORD else ""
+    return re.compile(pre + pat + post)
+
+
+def _expand_value_occurrences(text: str, findings: list[Finding],
+                              min_len: int = _VALUE_CONSISTENT_MIN_LEN) -> list[Finding]:
+    """Value-consistent masking: if ANY detector flagged a sensitive VALUE, mask
+    *every* literal occurrence of that value — not just the one span the detector
+    happened to return. NER (Presidio/GLiNER) routinely flags one occurrence of a
+    repeated name/codename and misses an identical one elsewhere; that residue is
+    exactly what the byte-level egress gate (and a careful user) must never see.
+
+    For each distinct redactable value (length >= ``min_len``), synthesize a Finding
+    for every boundary-safe occurrence not already covered, inheriting the highest-
+    severity witness's attribution. Overlap/precedence is then resolved uniformly by
+    :func:`merge_redaction_spans`, so this only ever masks MORE, never less."""
+    witness_by_value: dict[str, Finding] = {}
+    for f in findings:
+        if not (f.redactable and f.start >= 0 and f.end > f.start):
+            continue
+        v = f.text or ""
+        if len(v.strip()) < min_len:
+            continue
+        cur = witness_by_value.get(v)
+        if cur is None or _SEV_RANK.get(f.severity, 1) > _SEV_RANK.get(cur.severity, 1):
+            witness_by_value[v] = f
+    if not witness_by_value:
+        return findings
+
+    covered = {(f.start, f.end) for f in findings}
+    extra: list[Finding] = []
+    # Longest values first so a contained value's occurrences don't pre-claim a span
+    # the longer one should own (merge_redaction_spans would prefer the longer one
+    # anyway; this just keeps `extra` tidy + deterministic).
+    for value in sorted(witness_by_value, key=lambda s: (-len(s), s)):
+        w = witness_by_value[value]
+        for m in _occurrence_regex(value).finditer(text):
+            span = (m.start(), m.end())
+            if span in covered:
+                continue
+            covered.add(span)
+            extra.append(Finding(w.detector, w.category, w.entity, text[m.start():m.end()],
+                                 m.start(), m.end(), w.score, w.severity, redactable=True))
+    return findings + extra if extra else findings
+
+
 def apply_redactions(text: str, findings: Iterable[Finding], style: str = "mask",
-                     mapping: Optional[dict] = None) -> tuple[str, dict]:
+                     mapping: Optional[dict] = None,
+                     value_consistent: bool = True) -> tuple[str, dict]:
     """Replace each chosen span in `text`.
 
     style="mask"  -> ‹ENTITY›
     style="token" -> ‹ENTITY_n› with a consistent value->token map (relationships
                      preserved: the same value always gets the same token).
+
+    ``value_consistent`` (default True) masks EVERY literal occurrence of any
+    detected value, not just the span a detector returned — closing the NER
+    "found-one-missed-its-twin" leak (and making the egress gate order-independent).
+
     Returns (redacted_text, mapping) where mapping is token -> original value
     (style="token") so a trusted local caller can reverse it.
     """
+    findings = list(findings)
+    if value_consistent:
+        findings = _expand_value_occurrences(text, findings)
     spans = merge_redaction_spans(findings)
     mapping = mapping if mapping is not None else {}
     # Key the token map on the VALUE (not the label): the same value must always

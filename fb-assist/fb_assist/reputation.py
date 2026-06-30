@@ -1,6 +1,6 @@
 """fb_assist.reputation — the pseudonymous careful-filterer trust token (spec §13).
 
-WHAT THIS IS (the "ungameable careful-filterer trust" signal)
+WHAT THIS IS (the pseudonymous careful-filterer trust signal)
 -------------------------------------------------------------
 A user who consistently submits high-quality, well-redacted feedback earns
 *reputation*. That reputation rides along with their feedback as a **pseudonymous,

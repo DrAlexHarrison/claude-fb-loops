@@ -1,4 +1,4 @@
-# fb-assist — parity & gap ledger (the unflinching version)
+# fb-assist — parity & gap ledger
 
 The CLI keystone (Build 3) meets the full spec and is proven. Every *other* surface falls short of CLI parity. This ledger classifies each gap and drives it:
 
@@ -23,7 +23,7 @@ The CLI parity bar (10 powers): in-session morph · read any past on-disk sessio
 | H6 | **Cowork→Anthropic intake wire** | the server-side intake wire is undocumented (closed door) | **reference Cowork-intake adapter** built against the bundle's `coworkFeedback`/`FeedbackWindow` shape we *can* inspect (Claude Desktop now bundles Cowork — readable locally) | 📋 QUEUED (gated on Desktop inspect) |
 | H7 | **claude.ai/Desktop in-session morph** | no skill system in the web/Electron chat UI | the **export co-pilot** is the user-side answer (Build F); server-side ref is the Anthropic-side answer | 🔨 F BUILDING |
 
-> The honest line: H1–H7 are *recommendations wearing working-code costumes* — runnable references, not deployed capabilities. That's the strongest form the no-can-do's can take.
+> H1–H7 are runnable reference implementations, not deployed capabilities — the gap closes on Anthropic's side, and the seam is the buildable starting point.
 
 ---
 
@@ -35,12 +35,13 @@ The CLI parity bar (10 powers): in-session morph · read any past on-disk sessio
 | C2 | **Cowork: MCPB cross-platform packaging (incl. win32)** | vendored runtime + `darwin`/`win32`/`linux` manifest | 📋 QUEUED (Build E) |
 | C3 | **Question-loop not closed end-to-end** | Build 1 triager produces `open-questions.json` + **CLI `open_questions` reader tool** consumes it | 🔨 Build 1 BUILDING / reader 📋 (me) |
 | C4 | **Reputation token (§13): opaque stub** | real pseudonymous signed-token scheme (issuance/storage/sync/revocation) | 📋 OPEN (scope → interview) |
-| C5 | **Multi-session bundling: runtime wires one session** | wire `extra_sessions` through `assemble` (budget_pack already supports N) | 📋 QUEUED (me) |
+| C5 | **Multi-session bundling: runtime wires one session** | `assemble(extra_sessions=[…])` parses+redacts each and fits them under the 1 MB cap; `submit_begin` swaps + windows all targets | ✅ DONE |
 | C6 | **Profile cross-machine sync unspecced** | ride rc/bus config-sync or a thin syncer | 📋 QUEUED |
-| C7 | **NER over-redaction** (`JSON→PERSON`, `API→ORG`) | profile allow/deny (✅ partial) + genericize layer; recall/precision tuning | ⚠️ PARTIAL |
+| C7a | **NER value-consistent masking** (detector flags one occurrence, misses its twin) | `apply_redactions` masks every literal occurrence of any detected value (boundary-guarded); egress gate is now order-independent | ✅ DONE |
+| C7b | **NER over-redaction** (`JSON→PERSON`, `API→ORG`) | profile allow/deny (✅ partial) + genericize layer; recall/precision tuning | ⚠️ PARTIAL |
 | C8 | **API genericize degraded (no live Claude)** | pluggable LLM-genericize hook + optional local-Ollama pass | 📋 QUEUED |
 | C9 | **Production repo + FIX-4 fixture sanitization** | synthetic-fixture generator, scrub-gate, README+STRATEGY, CI, `make demo`, local `git init` | 📋 QUEUED (Build C) |
-| C10 | **Windows platform: all code is POSIX-assumed** | Windows-aware paths (`%APPDATA%`, `%USERPROFILE%\.claude`), config-dir resolution, atomic-rename + live-detect portability | 📋 OPEN (scope → interview) |
+| C10 | **Windows platform: all code is POSIX-assumed** | portable `project_slug` (non-`[A-Za-z0-9-]`→`-`, matches Claude Code on every OS); config dir already resolves via `Path.home()/.claude` = `%USERPROFILE%\.claude`; atomic-write guards `os.O_DIRECTORY`; live-detect falls back off `lsof`. Logic covered by hermetic Windows-sim tests; live Wine/QEMU run optional | ✅ DONE (code) / ⚠️ Wine fidelity optional |
 | C11 | **Langfuse/Helicone ingest schemas pinned from docs** | pin from a real captured export | ⚠️ needs a sample |
 
 ---
@@ -49,7 +50,7 @@ The CLI parity bar (10 powers): in-session morph · read any past on-disk sessio
 
 | # | Check | Who | Closes |
 |---|---|---|---|
-| E1 | **Live billed `response._request_id` success path** | needs **API credits** (account is $0) | the "ungameable anchor" claim (header-on-error + SDK-source + mocks already in hand) |
+| E1 | **Live billed `response._request_id` success path** | needs **API credits** (account is $0) | the request-id provenance anchor (header-on-error + SDK-source + mocks already in hand) |
 | E2 | **Cowork bundled-`claude` `/feedback` gather root includes `local-agent-mode-sessions`** | I run via tailscale `amac` (authorize) | "swap-restore works on Cowork slice-1" |
 | E3 | **Real `read_transcript` payload shape** | amac capture / Desktop bundled Cowork | pins `cowork_conversation.py` |
 | E4 | **VS Code Extension GUI "Give feedback" — attaches transcript or description-only?** | human at the panel + capture (HAR-analog) | finalizes the GUI swap-restore handoff |
@@ -57,6 +58,6 @@ The CLI parity bar (10 powers): in-session morph · read any past on-disk sessio
 
 ---
 
-## Coverage check (nothing left un-addressed)
-- Every **❌❌** has an extensible seam (built or queued). Every **❌** has a build (in flight or queued). Every **⚠️** has a named check.
-- The application's strength = the proven keystone **+ this ledger**. Handing Anthropic an honest parity ledger with a buildable plan for every gap is more convincing than a uniform-success story.
+## Coverage check
+- Every **❌❌** has a reference seam (built or queued). Every **❌** has a build (in flight or queued). Every **⚠️** has a named check.
+- The deliverable is the proven keystone plus this ledger: every gap is classified, and each one names either the build that closes it or the empirical check that would.

@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field as _dc_field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1092,6 +1093,24 @@ def redaction_map(source: TranscriptSource, categories: Iterable[str] | None = N
 # --------------------------------------------------------------------------- #
 # Transcript discovery (mirrors the /feedback gather: project dir + mtime window)
 # --------------------------------------------------------------------------- #
+# Claude Code names a session's project dir by replacing every character that is
+# NOT ASCII alphanumeric or '-' with '-' — so '/', '\\', '.', ':', spaces and '_'
+# all collapse to '-'. Verified against real on-disk dirs: a cwd ending in
+# '/.claude/worktrees/x' lands under '...--claude-worktrees-x' (the '/.' → '--').
+# This is the portable rule: it slugifies a Windows 'C:\\Users\\dana\\proj' to
+# 'C--Users-dana-proj' AND fixes the long-standing Linux miss on dotted/underscored
+# paths that a bare '/'->'-' replace produced the wrong dir name for.
+_SLUG_RE = re.compile(r"[^A-Za-z0-9-]")
+
+
+def project_slug(cwd: Union[str, Path]) -> str:
+    """The ``projects/<slug>`` directory name Claude Code writes for ``cwd``.
+
+    Portable across Linux/macOS/Windows: every non-``[A-Za-z0-9-]`` char becomes
+    ``-`` (the rule Claude Code itself uses; confirmed against real project dirs)."""
+    return _SLUG_RE.sub("-", str(cwd))
+
+
 def find_transcripts(project_dir: Union[str, Path, None] = None,
                      window_hours: float | None = None,
                      roots: Iterable[Union[str, Path]] | None = None,
@@ -1103,7 +1122,8 @@ def find_transcripts(project_dir: Union[str, Path, None] = None,
     (24 h / 7 d). Useful for the co-author to discover which session(s) to act on.
 
     * ``project_dir`` — a specific ``<cwd-slug>`` dir to scan; OR
-    * ``cwd`` — a working directory to slugify (``/`` -> ``-``) and find across roots; OR
+    * ``cwd`` — a working directory to slugify (:func:`project_slug`) and find
+      across roots; OR
     * ``roots`` — explicit ``projects`` parents (defaults to the three account dirs).
 
     Returns dicts: ``{path, size, mtime, session_id, project_dir}``."""
@@ -1119,7 +1139,7 @@ def find_transcripts(project_dir: Union[str, Path, None] = None,
                      home / ".claude-michelle" / "projects"]
         slug = None
         if cwd is not None:
-            slug = str(cwd).replace("/", "-")
+            slug = project_slug(cwd)
         for root in roots:
             root = Path(root)
             if not root.is_dir():

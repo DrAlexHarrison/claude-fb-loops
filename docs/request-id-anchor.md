@@ -1,11 +1,11 @@
-# FIX-5 — `response._request_id` is the ungameable anchor (verification)
+# FIX-5 — `response._request_id` as a verifiable provenance anchor (verification)
 
 **Binding fix (`plans/00-MANDATORY-FIXES.md` #5):** verify `response._request_id`
 on a LIVE instance across `messages.create`, `stream.get_final_message()`, and
 `messages.parse()`, plus `AnthropicBedrock`/`AnthropicVertex` (header may be
-absent → deterministic fallback). The whole "ungameable anchor" rests on this.
+absent → deterministic fallback). The provenance anchor rests on this.
 
-## Which path I took: **documented-script + partial-live + mocks** (honest)
+## Which path I took: documented-script + partial-live + mocks
 
 A real `sk-ant-api…` key IS present at `~/.config/anthropic/api_key`, so I tried
 the live call. It was **blocked by billing, not by key availability**:

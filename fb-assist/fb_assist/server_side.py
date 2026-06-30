@@ -26,7 +26,7 @@ how Anthropic stores conversations, captures consent, or persists feedback.
      in the request body — the server attaches its own stored copy. THIS is why
      the fix must be server-side: there is no client-side seam to redact a
      conversation that never travels in the request. The referenced **message
-     UUID** is the ungameable anchor here, exactly analogous to the Messages-API
+     UUID** is the verifiable anchor here, exactly analogous to the Messages-API
      ``request-id``.
 
   2. **The conversation schema** (from the PUBLIC export feature,
@@ -281,7 +281,7 @@ class FeedbackEvent:
 
     @property
     def anchor(self) -> dict:
-        """The ungameable reference: the URL UUIDs. The ``message_id`` ties the
+        """The verifiable reference: the URL UUIDs. The ``message_id`` ties the
         report to a real stored message with zero extra user content — analogous to
         the Messages-API ``request-id`` anchor on the API surface."""
         return {

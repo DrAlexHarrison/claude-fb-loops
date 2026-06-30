@@ -30,7 +30,7 @@ Public API:
   - :func:`strip_blocks`       the NEW Messages-API structural stripper
   - :func:`narrative_spans`    locate maskable narrative across the pair
   - :func:`message_text`       lenient `.text` over array-of-blocks OR bare-text
-  - :func:`extract_request_id` / :func:`anchor_for`   the ungameable anchor (FIX 5)
+  - :func:`extract_request_id` / :func:`anchor_for`   the verifiable anchor (FIX 5)
   - :func:`build_artifact` / :func:`build_draft`      assemble + the support@ draft
   - :class:`ReportingClient` (+ Bedrock/Vertex) ring-buffer wrapper, `report_last`
   - :func:`from_otel_line` / :func:`from_langfuse` / :func:`from_helicone` ingest
@@ -169,7 +169,7 @@ def message_text(msg: Any) -> str:
 class ReproPair:
     request: dict                      # Messages API request body (model/system/messages/tools/…)
     response: Optional[dict] = None    # Message response body (id/content/usage/stop_reason/…)
-    request_id: Optional[str] = None   # req_…  — the ungameable anchor (from the response header)
+    request_id: Optional[str] = None   # req_…  — the verifiable anchor (from the response header)
     source: str = "raw"                # raw | otel | langfuse | helicone
     provider: str = "anthropic"        # anthropic | bedrock | vertex
 
@@ -191,7 +191,7 @@ def to_pair(request: Any, response: Any = None, request_id: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
-# FIX 5 — the ungameable anchor: request-id extraction + deterministic fallback
+# FIX 5 — the verifiable anchor: request-id extraction + deterministic fallback
 # --------------------------------------------------------------------------- #
 def extract_request_id(obj: Any, *, provider: str = "anthropic") -> Optional[str]:
     """Pull the Anthropic ``request-id`` (``req_…``) from a response/stream.

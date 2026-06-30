@@ -1,10 +1,9 @@
 # Server-side consent-genericize — a drop-in reference for the claude.ai feedback flow
 
-> **The pitch in one line:** I didn't just flag the privacy gap in the claude.ai
-> thumbs-down flow — here's a **drop-in reference implementation** your internal
-> Claude can adapt in an afternoon. Implement **three methods** and the
-> genericize-before-attach core, the two-pass re-identification verify, the
-> fail-closed egress gate, and the audit record are already done.
+> A drop-in reference implementation for the claude.ai thumbs-down flow. The caller
+> implements **three methods** (the adapter ports); the genericize-before-attach core,
+> the two-pass re-identification verify, the fail-closed egress gate, and the audit
+> record are provided.
 
 Module: [`fb_assist/server_side.py`](../fb_assist/server_side.py) · Tests:
 [`tests/test_server_side.py`](../tests/test_server_side.py) · Runnable demo:

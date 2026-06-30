@@ -129,9 +129,9 @@ repro.
 build — it gives a user a privacy-safe, genericized artifact today, with zero ToS exposure, that they can
 carry into any first-party feedback or `support@` thread. The Anthropic-side answer is the **server-side
 consent-genericize step** — the same fb-assist core (the `redact.py` detectors + the genericize verifier +
-the effort-signal schema), run where the conversation already lives. The ungameable anchor on this surface:
+the effort-signal schema), run where the conversation already lives. The anchor on this surface:
 **the server already holds the conversation**, so the user contributes only *consent + the genericized delta
-+ the effort signal* — minimal added content, maximal triage value. Closing exactly this privacy-vs-feedback
++ the effort signal* — minimal added content. Closing exactly this privacy-vs-feedback
 gap is the work the Feedback Loops role exists to do.
 
 ## Out of scope — the browser interceptor (definitively)

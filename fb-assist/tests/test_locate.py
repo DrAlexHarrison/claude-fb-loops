@@ -89,6 +89,39 @@ def test_slugify_cwd_mirrors_transcripts():
     assert L.slugify_cwd(Path("/a/b")) == "-a-b"
 
 
+def test_slugify_cwd_is_portable():
+    """Claude Code replaces EVERY non-[A-Za-z0-9-] char with '-' (verified against
+    real on-disk dirs). The portable rule fixes both a Linux miss on dotted/worktree
+    paths and the whole of native-Windows path slugging."""
+    # Linux worktree path: '/.claude/' → '--claude-' (the leading '/.' collapses).
+    assert (L.slugify_cwd("/home/devuser/code/contoso/.claude/worktrees/x")
+            == "-home-devuser-code-contoso--claude-worktrees-x")
+    # Underscores and dots in a repo name also collapse.
+    assert L.slugify_cwd("/home/u/my_repo.v2") == "-home-u-my-repo-v2"
+    # Native Windows: backslashes AND the drive colon become '-' (double at 'C:').
+    assert L.slugify_cwd(r"C:\Users\dana\code\proj") == "C--Users-dana-code-proj"
+
+
+def test_resolve_windows_layout(tmp_path, monkeypatch):
+    """End-to-end resolve over a simulated NATIVE-WINDOWS on-disk layout
+    (%USERPROFILE%\\.claude\\projects\\<win-slug>\\<sid>.jsonl), reproduced on this
+    host as plain directory names. Proves the Windows slug resolves a real session."""
+    win_cwd = r"C:\Users\dana\code\proj"
+    slug = L.slugify_cwd(win_cwd)
+    assert slug == "C--Users-dana-code-proj"
+    cfg = tmp_path / ".claude"
+    proj = cfg / "projects" / slug
+    now = time.time()
+    sess = _write_session(proj, "win-sess-1", mtime=now)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.setattr(L, "is_being_written", lambda *a, **k: False)
+
+    r = L.resolve(cwd=win_cwd, roots=[cfg / "projects"])
+    assert r["path"] == str(sess)
+    assert r["session_id"] == "win-sess-1"
+    assert r["slug"] == slug
+
+
 def test_live_session_id_reads_env(monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
     assert L.live_session_id() is None

@@ -12,7 +12,7 @@ runnable, framework-agnostic, stdlib-only **reference** of what an Anthropic
 ``POST /v1/feedback`` intake **would** look like — the same port/adapter shape as
 :mod:`fb_assist.server_side`, so an Anthropic engineer implements ONE small adapter
 (the :class:`FeedbackSink`) against their real store and the privacy-bearing core —
-the fail-closed deterministic floor, the ungameable request-id anchor check, and the
+the fail-closed deterministic floor, the verifiable request-id anchor check, and the
 optional reputation-token verification — is already done, tested, and reusable.
 
 Together the two modules show the WHOLE loop:
@@ -47,7 +47,7 @@ THE INTAKE CONTRACT (what the endpoint enforces)
      and **rejects anything that still carries a secret/PII** (an under-redacted or
      tampered artifact never enters the store);
   3. **verifies the anchor** — the ``request_id`` must match the Anthropic
-     ``req_…`` shape (the ungameable anchor that ties the report to a real metered
+     ``req_…`` shape (the verifiable anchor that ties the report to a real metered
      call); a non-Anthropic provider may instead present the deterministic-fingerprint
      fallback (accepted, flagged ``verifiable: False``);
   4. **optionally verifies the reputation token** via
@@ -126,7 +126,7 @@ __all__ = [
     "main",
 ]
 
-# The Anthropic request-id shape (the ungameable anchor). Verified against the public
+# The Anthropic request-id shape (the verifiable anchor). Verified against the public
 # Messages-API response header (``request-id: req_…``); see claude_repro.anchor_for.
 REQUEST_ID_RE = re.compile(r"^req_[A-Za-z0-9]{6,}$")
 
@@ -175,7 +175,7 @@ class FeedbackSink(Protocol):
 class IntakeSubmission:
     """One inbound ``claude_repro`` artifact, in the OBSERVABLE contract shape.
 
-    ``request_id`` is the ungameable anchor (the Messages-API ``req_…``).
+    ``request_id`` is the verifiable anchor (the Messages-API ``req_…``).
     ``redacted_repro`` is ``{"request": …, "response": …}`` AFTER the SDK's local
     redaction. ``effort_signal`` is the cross-surface signal the SDK emits.
     ``reputation_token`` is the OPTIONAL serialized token (also mirrored inside
@@ -416,7 +416,7 @@ def intake(
         return _reject(REASON_RESIDUAL_FLOOR_LEAK, {"type": "none", "verifiable": False},
                        False, floor_clean=False, floor_residual=_floor_residual_summary(floor))
 
-    # (3) anchor verification — the ungameable request-id (or the deterministic fallback).
+    # (3) anchor verification — the verifiable request-id (or the deterministic fallback).
     anchor, verifiable, anchor_reason = _resolve_anchor(submission)
     if anchor_reason:
         return _reject(anchor_reason, anchor, verifiable)
