@@ -167,26 +167,46 @@ def list_sessions(cwd: Optional[str] = None, window_hours: Optional[float] = Non
 # See (extract)                                                                #
 # --------------------------------------------------------------------------- #
 def extract(session_id: str, category: str, cwd: Optional[str] = None,
-            reveal: bool = False, limit: int = 50) -> dict:
+            reveal: bool = False, limit: int = 50, reveal_char_cap: int = 2000) -> dict:
     """Locate one category's spans (``transcripts.extract``). Returns LOCATORS +
-    previews by default (``reveal=True`` for full text — use sparingly). Capped."""
+    previews by default (``reveal=True`` for full text — use sparingly). Capped on BOTH
+    span COUNT (``limit``) and revealed BYTES per span (``reveal_char_cap``): a handful
+    of ``file_contents`` spans can be megabytes, which would blow the MCP token budget
+    (the 770 KB ``list_sessions`` class, S1)."""
     s = _session(session_id, cwd)
     spans = list(T.extract(_need_path(s), category))
-    out = [(sp.to_dict() if reveal else sp.locator()) for sp in spans[:limit]]
-    return {"category": category, "count": len(spans), "returned": len(out), "spans": out}
+    out = []
+    for sp in spans[:limit]:
+        if reveal:
+            d = sp.to_dict()
+            t = d.get("text") or ""
+            if len(t) > reveal_char_cap:
+                d["text"] = t[:reveal_char_cap]
+                d["full_len"] = len(t)
+                d["truncated"] = True
+            out.append(d)
+        else:
+            out.append(sp.locator())
+    return {"category": category, "count": len(spans), "returned": len(out),
+            "truncated": len(spans) > limit, "spans": out}
 
 
 def relevant_slice(session_id: str, needle: str, context_turns: int = 1,
-                   cwd: Optional[str] = None) -> dict:
+                   cwd: Optional[str] = None, limit: int = 40) -> dict:
     """The exchange around an error/keyword/uuid (``transcripts.relevant_slice``).
-    Returns compact record summaries — uuid, type, and a short preview."""
+    Returns compact record summaries — uuid, type, and a short preview. S1: rejects an
+    empty needle (which matches the WHOLE transcript) and caps returned records."""
+    if not (needle or "").strip():
+        return {"error": "needle must be non-empty — an empty needle matches every "
+                         "record and would return the whole transcript."}
     s = _session(session_id, cwd)
     recs = T.relevant_slice(_need_path(s), needle, context_turns=context_turns)
     summ = []
-    for r in recs:
+    for r in recs[:limit]:
         txt = P._record_text(r.raw)  # package's record->text helper
         summ.append({"uuid": r.uuid, "type": r.type, "preview": (txt or "")[:160]})
-    return {"needle": needle, "matched_records": len(recs), "records": summ}
+    return {"needle": needle, "matched_records": len(recs), "returned": len(summ),
+            "truncated": len(recs) > limit, "records": summ}
 
 
 def size_estimate(session_id: str, by_category: bool = False, cwd: Optional[str] = None) -> dict:
@@ -199,11 +219,19 @@ def size_estimate(session_id: str, by_category: bool = False, cwd: Optional[str]
 # --------------------------------------------------------------------------- #
 # Detect                                                                       #
 # --------------------------------------------------------------------------- #
-def detect(session_id: str, cwd: Optional[str] = None) -> dict:
+def detect(session_id: str, cwd: Optional[str] = None, limit: int = 200) -> dict:
     """The unified WHERE+WHAT pass (``pipeline.analyze``): where each category lives
-    + what's sensitive in the kept narrative. Values MASKED by default (gotcha #2)."""
+    + what's sensitive in the kept narrative. Values MASKED by default (gotcha #2).
+    S1: caps the (masked) narrative_findings list so a finding-dense session can't blow
+    the MCP token budget — the count + flag stay accurate."""
     s = _session(session_id, cwd)
-    return PL.analyze(_ensure_parsed(s))
+    result = PL.analyze(_ensure_parsed(s))
+    nf = result.get("narrative_findings") or []
+    if len(nf) > limit:
+        result["narrative_findings"] = nf[:limit]
+        result["narrative_findings_total"] = len(nf)
+        result["narrative_findings_truncated"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -365,16 +393,20 @@ def preview(session_id: str, cwd: Optional[str] = None) -> dict:
     }
 
 
-def leak_scan(session_id: str, cwd: Optional[str] = None) -> dict:
+def leak_scan(session_id: str, cwd: Optional[str] = None, candidate_limit: int = 100) -> dict:
     """The two-layer egress gate (``pipeline.egress_gate``). Returns the HARD,
     machine-decidable FLOOR (must be empty to ship) + NER CANDIDATES for self-repair
-    (never a boolean veto). Call ``assemble`` first."""
+    (never a boolean veto). Call ``assemble`` first. S1: caps the candidate list (the
+    count stays exact) so a noisy NER pass can't blow the MCP token budget."""
     s = _session(session_id, cwd)
     if s.payload is None:
         return {"error": "nothing assembled yet — call assemble() first"}
     gate = PL.egress_gate(PL.upload_text(s.payload),
                           PL.content_surface(s.sanitized_raws or [], s.description))
     s.gate = gate
+    cands = gate.get("candidates") or []
+    if len(cands) > candidate_limit:
+        gate = {**gate, "candidates": cands[:candidate_limit], "candidates_truncated": True}
     return gate
 
 
@@ -382,15 +414,25 @@ def leak_scan(session_id: str, cwd: Optional[str] = None) -> dict:
 # Ship (the two-phase handoff)                                                 #
 # --------------------------------------------------------------------------- #
 def submit_begin(session_id: str, allow_live_gate: bool = False,
-                 cwd: Optional[str] = None) -> dict:
+                 cwd: Optional[str] = None, live_session_id: Optional[str] = None) -> dict:
     """Stage the sanitized bytes for the user's interactive ``/feedback`` turn.
 
+    ``live_session_id`` — the CURRENTLY-LIVE session id (the skill passes a fresh
+    ``$CLAUDE_CODE_SESSION_ID`` here). It identifies which on-disk file the native
+    gather would co-upload raw, and which file begin_swap must refuse to swap (FIX-3).
+    Falls back to ``session_id`` (correct when the feedback IS about the live session);
+    never the MCP server's frozen spawn-time env (M3).
+
     (1) FIX 1 — the gather-gate: read the LIVE session's on-disk bytes *as of now*
-        and run the deterministic floor over them, so the co-author sees exactly
-        what the live session would co-upload. If it's not clean and
-        ``allow_live_gate`` is False, REFUSE and recommend checkpoint (the airtight
-        path) — the live tail is what the staged-bytes scan can't cover.
-    (2) ``begin_swap`` the targets (FIX 3 live-id refusal + FIX 2 journaled
+        and run the DETERMINISTIC egress scan over them (secrets + PII-regex + paths +
+        env-metadata + IP-markers — the floor PLUS the structural-leak detectors, but
+        no NER, which hallucinates over raw JSONL). So the co-author sees what the live
+        session would co-upload *raw*. If it's not clean and ``allow_live_gate`` is
+        False, REFUSE and recommend checkpoint (the airtight path). This catches the
+        file-contents / paths / cwd-gitBranch leaks the secret-only floor missed.
+    (2) S3 — fail-closed: re-assert the deterministic floor over the staged payload
+        bytes here (the mechanism, not just the model's leak_scan call, holds the line).
+    (3) ``begin_swap`` the targets (FIX 3 live-id refusal + FIX 2 journaled
         windowing: age every OTHER past file out of the +7d window so the native
         gather matches what we staged).
     Returns the journal path + the exact ``/feedback`` instruction."""
@@ -398,26 +440,48 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
     if s.payload is None:
         return {"staged": False, "error": "nothing assembled yet — call assemble() first"}
 
+    # S3 — the mechanism holds the floor: never stage a payload whose own bytes fail the
+    # deterministic floor, regardless of whether the co-author ran leak_scan first.
+    payload_gate = PL.egress_gate(PL.upload_text(s.payload),
+                                  PL.content_surface(s.sanitized_raws or [], s.description))
+    if not payload_gate.get("floor_clean") and not allow_live_gate:
+        return {
+            "staged": False,
+            "reason": "the staged payload itself still trips the deterministic floor",
+            "recommend": "run leak_scan(), self-repair the floor findings, re-assemble, "
+                         "then submit_begin again (or pass allow_live_gate=True to override).",
+            "payload_floor": payload_gate.get("floor"),
+            "gather_floor_clean": False,
+        }
+
+    # M3 — identify the LIVE session (the one /feedback co-uploads raw) by the freshest
+    # authoritative id: the skill's `live_session_id` if given, else the env-resolved id.
+    # NOT the target id (s.session_id) — the target is usually a *past* session, and
+    # conflating them makes begin_swap's FIX-3 refuse to swap the legitimate target.
     info = L.resolve(cwd=s.cwd)
-    live_path = info.get("path") if info.get("is_live") else None
-    live_id = info.get("live_session_id")
+    live_id = live_session_id or info.get("live_session_id")
+    live_path = L.resolve(cwd=s.cwd, session_id=live_id).get("path") if live_id else None
     live_contrib: dict = {"path": None, "floor_clean": True}
     if live_path and os.path.isfile(live_path) and live_path not in s.payload.targets:
         live_text = Path(live_path).read_text(encoding="utf-8", errors="replace")
-        fs = R_scan_secrets(live_text)
-        fp = R_scan_pii_regex(live_text)
+        # M1 — the FULL deterministic egress scan over the raw live bytes (not just
+        # secrets+PII): a content-rich live session correctly trips the gate.
+        live_findings = R_deterministic_leak_scan(live_text)
+        by_cat: dict = {}
+        for f in live_findings:
+            by_cat[f.category] = by_cat.get(f.category, 0) + 1
         live_contrib = {
             "path": live_path,
             "bytes": os.path.getsize(live_path),
-            "floor_clean": not fs and not fp,
-            "secret_count": len(fs),
-            "pii_floor_count": len(fp),
+            "floor_clean": not live_findings,
+            "finding_count": len(live_findings),
+            "by_category": by_cat,
         }
     gather_floor_clean = bool(live_contrib["floor_clean"])
     if not gather_floor_clean and not allow_live_gate:
         return {
             "staged": False,
-            "reason": "the live session would co-upload sensitive content",
+            "reason": "the live session would co-upload sensitive content (raw)",
             "recommend": "checkpoint: run /clear (closes & flushes the live file → it "
                          "becomes a swappable past session), then submit from the fresh "
                          "thin session. Or call submit_begin(allow_live_gate=True) to override.",
@@ -435,8 +499,9 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
     return {
         "staged": True,
         "journal_path": handle.journal_path,
-        "scope_instruction": "Run /feedback, choose scope +7 days (so it gathers the session "
-                             "I prepared), submit, then tell me 'done'.",
+        "scope_instruction": "Run `/feedback` → pick the **+7 days** window (anything ≥ the "
+                             "session I staged is safe — I aged the rest out) → submit. Then "
+                             "press **1** (or say 'done') and I'll restore your originals.",
         "swapped_targets": list(s.payload.targets),
         "windowed_out": len(others),
         "live_session_contribution": live_contrib,
@@ -446,9 +511,20 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
 
 def submit_finish(session_id: str, cwd: Optional[str] = None) -> dict:
     """Restore the originals byte-exact after the user's ``/feedback`` run
-    (``finish_swap``). Idempotent."""
+    (``finish_swap``). Idempotent.
+
+    S2 — if the in-memory journal path is gone (the MCP server restarted mid-flow),
+    fall back to ``package.recover()``, which scans the durable backup root and restores
+    any dangling swap from disk. Data was never at risk (the journal is durable), but
+    this restores the user's real transcript *now* instead of leaving the sanitized stub
+    on disk until the next ``/fb`` startup runs ``recover_orphans``."""
     s = _session(session_id, cwd)
     if not s.journal_path:
+        healed = P.recover()
+        restored = [h for h in healed if h.get("status") == "restored"]
+        if restored:
+            return {"restored": True, "via": "recover", "healed": restored,
+                    "note": "restored from a durable journal after a server restart"}
         return {"restored": False, "error": "no staged swap for this session (submit_begin first)"}
     report = P.finish_swap(s.journal_path, raise_on_failure=False)
     s.journal_path = None if report.ok else s.journal_path
@@ -581,6 +657,13 @@ def R_scan_secrets(text: str):
 def R_scan_pii_regex(text: str):
     from . import redact as R
     return R._scan_pii_regex(text)
+
+
+def R_deterministic_leak_scan(text: str):
+    """The FP-resistant egress scan for RAW bytes (secrets + PII-regex + paths + env +
+    IP-markers; NO NER). The right gate for the un-redacted live transcript."""
+    from . import redact as R
+    return R.deterministic_leak_scan(text)
 
 
 # --------------------------------------------------------------------------- #

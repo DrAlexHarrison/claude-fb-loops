@@ -205,6 +205,38 @@ def test_submit_begin_refuses_dirty_live_session(seeded, monkeypatch, tmp_path):
     assert path.read_bytes()  # nothing swapped
 
 
+def test_submit_begin_refuses_content_rich_live_session(seeded, monkeypatch, tmp_path):
+    """M1: a live session with NO secret/PII-floor hit but rich in file contents / paths /
+    cwd+gitBranch must still trip the gather-gate — the old secret-only floor cleared it
+    and let it upload raw. The deterministic leak-scan (paths + env) now catches it."""
+    sid, path, _ = seeded
+    live = tmp_path / "live-content-1234.jsonl"
+    live.write_text(
+        '{"type":"user","cwd":"/home/realdev/acme-secret-svc","gitBranch":"release/q3",'
+        '"message":{"role":"user","content":"trace through /home/realdev/acme-secret-svc/billing/auth.py"}}\n')
+    monkeypatch.setattr(M.L, "resolve", lambda cwd=None, session_id=None: {
+        "path": str(live), "is_live": True, "live_session_id": "live-content-1234",
+        "candidates": [{"path": str(path)}, {"path": str(live)}],
+    })
+    M.redact_recipe(sid, {"profile_apply": False})
+    M.assemble(sid, "freeze")
+    sb = M.submit_begin(sid)  # default allow_live_gate=False
+    assert sb["staged"] is False, sb
+    assert sb["gather_floor_clean"] is False
+    assert "checkpoint" in sb["recommend"]
+    cats = sb["live_session_contribution"]["by_category"]
+    assert any(c in cats for c in ("path", "env_metadata")), cats
+    assert path.read_bytes()  # nothing swapped
+
+
+def test_relevant_slice_rejects_empty_needle(seeded):
+    """S1: an empty/whitespace needle matches every record (`'' in text` is always
+    true) — it must be rejected, not return the whole transcript."""
+    sid, _, _ = seeded
+    out = M.relevant_slice(sid, "   ")
+    assert "error" in out and "non-empty" in out["error"]
+
+
 def test_recover_orphans_runs(seeded):
     out = M.recover_orphans()
     assert "journals" in out and "healed" in out

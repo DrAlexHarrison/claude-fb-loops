@@ -493,6 +493,7 @@ def begin_swap(
     # ---- Phase 1: pre-flight ALL targets. Nothing on disk changes if any fails.
     entries: list[SwapEntry] = []
     staged: list[tuple[str, bytes, float]] = []  # (real_path, sanitized_bytes, mtime_to_apply)
+    originals_by_path: dict[str, bytes] = {}      # S4: read each target ONCE, reuse for backup
     for path, sanitized in targets.items():
         if not isinstance(sanitized, (bytes, bytearray)):
             raise TypeError(f"sanitized content for {path} must be bytes, got {type(sanitized).__name__}")
@@ -511,6 +512,7 @@ def begin_swap(
             )
         with open(path, "rb") as f:
             original = f.read()
+        originals_by_path[path] = original
         st = os.stat(path)
         entries.append(
             SwapEntry(

@@ -504,31 +504,37 @@ def _scan_narrative(text: str, use_gliner: bool = True) -> list[R.Finding]:
 
 
 def _enforce_secret_floor(root: dict, rmap: list, max_iter: int = 4) -> int:
-    """Belt-and-suspenders: guarantee the deterministic SECRET floor over the
-    ACTUAL upload bytes is empty. The targeted narrative pass already masks the
-    common case with nice entity labels; this sweep literal-removes any secret
-    value that survived in a non-narrative field (metadata, an unexpected leaf),
-    so the hard gate can never fail. Returns the number of values removed."""
+    """Belt-and-suspenders: guarantee the deterministic floor over the ACTUAL upload
+    bytes is empty — both SECRETS *and* the PII regex floor (email / IPv4 / US SSN).
+    The targeted narrative pass already masks the common case with nice entity labels;
+    this sweep literal-removes any secret OR floor-PII value that survived in a
+    non-narrative field (metadata, a kept tool-result leaf), so the hard gate can never
+    fail with one of those sitting in the bytes (M2). Returns the number removed."""
     removed = 0
     for _ in range(max_iter):
         upload = json.dumps(root, ensure_ascii=False)
-        findings = R.scan_secrets(upload)
-        values = {f.text for f in findings if f.text}
-        if not values:
+        findings = R.scan_secrets(upload) + R._scan_pii_regex(upload)
+        # Keep the highest-fidelity label per surviving value for attribution.
+        val_label: dict = {}
+        for f in findings:
+            if f.text:
+                val_label.setdefault(f.text, R._token_label(f.entity))
+        if not val_label:
             break
 
         def _scrub(s: str) -> str:
             nonlocal removed
-            hit = [v for v in values if v and v in s]
+            hit = [v for v in val_label if v and v in s]
             if not hit:
                 return s
             new = s
             for v in hit:
-                new = new.replace(v, "‹SECRET›")
+                label = val_label.get(v) or "REDACTED"
+                new = new.replace(v, f"‹{label}›")
                 removed += 1
-                rmap.append({"location": "(residual)", "api_category": "residual_secret",
-                             "method": "mask", "entity": "SECRET", "original": v,
-                             "replacement": "‹SECRET›", "count": 1})
+                rmap.append({"location": "(residual)", "api_category": "residual_floor",
+                             "method": "mask", "entity": label, "original": v,
+                             "replacement": f"‹{label}›", "count": 1})
             return new
 
         _walk_mutate_strings(root, _scrub)
@@ -561,7 +567,7 @@ class Artifact:
     effort_signal: dict
     redaction_map: list               # unified mask + strip events
     preview: "ReproPreview"           # FIX 6 — built from redaction_map, not diff_preview
-    hard_gate_pass: bool              # deterministic secret floor over upload == []
+    hard_gate_pass: bool              # deterministic secret + PII-regex floor over upload == []
     leak_candidates: list = field(default_factory=list)  # soft NER self-repair candidates
 
     def to_dict(self) -> dict:
@@ -649,12 +655,14 @@ def redact_pair(request: Any, response: Any = None, request_id: Optional[str] = 
             T.replace_span(root, sp, final_text)
     pair.request, pair.response = root["request"], root["response"]
 
-    # (3) HARD GATE — deterministic secret floor over the real upload bytes.
+    # (3) HARD GATE — deterministic secret + PII-regex floor over the real upload bytes
+    #     (M2: an email/IP/SSN in a non-narrative field must fail the gate too, not just
+    #     secrets — matching every other surface's floor).
     _enforce_secret_floor(root, rmap)
     pair.request, pair.response = root["request"], root["response"]
     upload_text = json.dumps({"request": pair.request, "response": pair.response}, ensure_ascii=False)
-    residual_secrets = R.scan_secrets(upload_text)
-    hard_gate_pass = (residual_secrets == [])
+    residual_floor = R.scan_secrets(upload_text) + R._scan_pii_regex(upload_text)
+    hard_gate_pass = (residual_floor == [])
 
     # (4) SOFT GATE — NER leak_scan over the rendered narrative (candidates only).
     leak_candidates = [f.to_dict() for f in R.leak_scan("\n".join(rendered_parts), use_gliner=use_gliner)]
@@ -1349,7 +1357,34 @@ def main(argv=None) -> int:
     ls = sub.add_parser("leak-scan", help="adversarial egress scan over a sanitized bundle")
     ls.add_argument("bundle")
 
+    sub.add_parser("demo", help="self-contained synthetic redaction demo (no input needed)")
+
     args = ap.parse_args(argv)
+
+    if args.cmd == "demo":
+        req = {
+            "model": "claude-sonnet-4-5", "max_tokens": 256,
+            "system": "You are Contoso's billing agent. Config at /home/devx/contoso/secrets.yaml.",
+            "messages": [{"role": "user", "content": (
+                "I'm Dana (dana@contoso.example). My key sk-ant-api03-DEMO1111DEMO2222DEMO3333 "
+                "leaked into the trace. The bug: streaming stalls after the first tool_use.")}],
+        }
+        resp = {"id": "msg_demo", "type": "message", "role": "assistant",
+                "content": [{"type": "text", "text": "Acknowledged — the streaming stall is the issue."}],
+                "usage": {"input_tokens": 40, "output_tokens": 12}}
+        art = redact_pair(req, resp, "req_011DEMOanchor00000000000")
+        planted = ("dana@contoso.example", "sk-ant-api03-DEMO1111DEMO2222DEMO3333",
+                   "/home/devx/contoso/secrets.yaml")
+        print("[ BEFORE ]  the user turn as the SDK captured it (secrets visible):")
+        print("    " + req["messages"][0]["content"])
+        print("\n[ AFTER ]  the redacted repro that would ship:")
+        print(art.preview.render())
+        leaked = [v for v in planted if v in art.upload_text()]
+        print(f"\nhard_gate_pass (deterministic floor empty): {art.hard_gate_pass}")
+        print(f"request-id anchor: {json.dumps(art.anchor, ensure_ascii=False)}")
+        print("RESULT:", "GREEN — every planted value absent from the upload bytes."
+              if not leaked else f"LEAK: {leaked}")
+        return 0 if (art.hard_gate_pass and not leaked) else 1
 
     if args.cmd == "redact":
         art = redact_pair(_load_json(args.request),

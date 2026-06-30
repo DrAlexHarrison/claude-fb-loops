@@ -503,3 +503,22 @@ def test_cli_redact_subcommand(tmp_path, capsys):
     blob = json.dumps(out)
     for value in ALL_SENTINELS.values():
         assert value not in blob
+
+
+def test_floor_sweep_catches_pii_in_nonnarrative_fields():
+    """M2: the hard-gate floor must catch email / IPv4 / US-SSN that live OUTSIDE
+    narrative spans (a metadata leaf, a structured response field) — not just secrets.
+    Before the fix, hard_gate_pass returned True with one of these still in the bytes."""
+    from fb_assist import redact as R
+    root = {
+        "request": {"metadata": {"contact": "leak.me@corp.example", "ip": "203.0.113.7"}},
+        "response": {"trace": "row dump ssn=123-45-6789 in a structured field"},
+    }
+    rmap: list = []
+    removed = CR._enforce_secret_floor(root, rmap)
+    blob = json.dumps(root)
+    assert "leak.me@corp.example" not in blob
+    assert "203.0.113.7" not in blob
+    assert "123-45-6789" not in blob
+    assert removed >= 3
+    assert R.scan_secrets(blob) == [] and R._scan_pii_regex(blob) == []

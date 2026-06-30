@@ -6,7 +6,7 @@ Five checks I can't run headlessly. Each is self-contained. Do them in any order
 
 ## SETUP (once, ~30 sec)
 1. Open a terminal.
-2. Type:  `code ~/claude-fb-loops`  and press **Enter**.  (This opens VS Code in the fb-assist repo, where the `fb-assist` MCP server is registered and the `/fb` skill lives.)
+2. Open this repo in your IDE — VS Code: `code <path-to>/claude-fb-loops` (or "File → Open Folder"); JetBrains/Cursor: open the folder the same way. This is where the `fb-assist` MCP server is registered and the `/fb` skill lives (run `make install` first if you haven't).
 3. Wait for VS Code to finish loading (bottom status bar stops spinning).
 
 ---

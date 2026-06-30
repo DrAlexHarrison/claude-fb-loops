@@ -59,6 +59,25 @@ structural strips + a crash-safe swap-restore — so the demo runs on a bare int
 with no model downloads and no network. With the optional NER stack installed it also
 masks the person name; that pass is additive and never the gate.
 
+Each surface has its own one-command demo (all offline, off built-in fixtures):
+`make demo-api` · `make demo-desktop` · `make demo-serverside` · `make demo-cowork`, or
+`make demo-all` for every surface at once.
+
+---
+
+## Activate `/fb` in your own sessions
+
+```bash
+make setup      # one-time: install the packages + NER stack (heavy; see banner)
+make install    # copies the /fb skill + registers the fb-assist MCP server (idempotent)
+# restart Claude Code, then type /fb in any session
+```
+
+`make install` computes its own interpreter path and merges the `fb-assist` server into
+`~/.claude.json` (backing it up first) — no hand-editing. `make uninstall` reverses it.
+Optional: `python fb-assist/scripts/install.py --print-hooks` prints the proactive-watcher
+hook snippet. Details + the IDE/JetBrains story: [`fb-assist/RUNTIME.md`](fb-assist/RUNTIME.md).
+
 ---
 
 ## How the integration works
@@ -91,7 +110,7 @@ mid-submit.
 
 ```bash
 make setup      # one-time: installs the NER stack + spaCy model (HEAVY — banner warns)
-make test       # 370 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline)
+make test       # 375 (fb-assist) + 46 (fb-os) + 48 (pps-pipeline)
 make scrub-gate # asserts ZERO real personal data in tracked files
 ```
 
@@ -140,6 +159,7 @@ the user's disk (rewriteable before send) or server-side (not). What's in this r
 | **API / Console** | `claude_repro.py` | forward-transform SDK; ties each report to its `request-id` |
 | **claude.ai export** | `desktop_chat.py` | co-pilot over an exported `conversations.json` — genericize + effort-signal, ToS-clean |
 | **claude.ai / VS Code thumbs** | `server_side.py` | reference consent-genericize gate for the *referenced* (not inlined) feedback POST |
+| **Cowork** | `cowork.py` | reference adapter for the Cowork surface's `coworkFeedback` / `FeedbackWindow` shape (`make demo-cowork`) |
 | **Org-wide loop** | `fb-os/` | ingest distilled artifacts → cluster (Clio-style) → triage → publish `open-questions.json` |
 | **Work-observation** | `pps-pipeline/` | recorded session → interleaved, redacted, text-only package + cited assessment |
 
@@ -156,7 +176,7 @@ catalogued in [`GAPS.md`](GAPS.md).
 git clone <this-repo> && cd claude-fb-loops
 make demo            # offline, no install, no downloads
 make setup           # install the full NER stack (heavy; see banner) to run the suite
-make test            # 370 + 46 + 48 tests
+make test            # 375 + 46 + 48 tests
 make scrub-gate      # check that no personal data ships
 ```
 

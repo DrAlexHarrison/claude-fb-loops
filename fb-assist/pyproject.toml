@@ -37,6 +37,11 @@ fb-redact = "fb_assist.redact:main"
 fb-package = "fb_assist.package:main"
 # The fb-assist MCP server entrypoint (registered in ~/.claude.json).
 fb-assist-mcp = "fb_assist.mcp_server:main"
+# The per-surface CLIs — each runnable + with a built-in `demo` / default fixture.
+claude-repro = "fb_assist.claude_repro:main"
+fb-desktop-chat = "fb_assist.desktop_chat:main"
+fb-server-side = "fb_assist.server_side:main"
+fb-cowork = "fb_assist.cowork:main"
 
 [tool.setuptools]
 packages = ["fb_assist"]

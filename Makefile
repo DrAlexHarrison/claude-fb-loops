@@ -10,13 +10,15 @@ export USE_TF := 0
 export USE_FLAX := 0
 export TOKENIZERS_PARALLELISM := false
 
-.PHONY: help demo demo-all test test-fb-assist test-fb-os test-pps \
+.PHONY: help demo demo-all demo-api demo-desktop demo-serverside demo-cowork \
+        install uninstall test test-fb-assist test-fb-os test-pps \
         fixtures setup lint scrub-gate clean
 
 help:
 	@echo "claude-fb-loops targets:"
 	@echo "  make demo        — fb-assist redacts a planted-secret session, end-to-end (no network, no downloads)"
-	@echo "  make demo-all    — demo + the fb-os and pps-pipeline demos"
+	@echo "  make demo-all    — every surface's demo (CLI + the 4 thin edges + fb-os + pps-pipeline)"
+	@echo "  make install     — activate /fb: install the skill + register the MCP server (idempotent)"
 	@echo "  make test        — run all three test suites (needs 'make setup' for fb-assist's NER recall tests)"
 	@echo "  make fixtures     — (re)generate the synthetic fb-assist fixtures"
 	@echo "  make setup       — install the packages + NER stack + spaCy model (HEAVY — see banner)"
@@ -28,9 +30,29 @@ help:
 demo:
 	@PYTHONPATH=$(FBA) $(PY) $(FBA)/examples/demo.py
 
+# Per-surface demos — each runs off a built-in synthetic fixture, offline, no install.
+demo-api:
+	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.claude_repro demo
+demo-desktop:
+	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.desktop_chat
+demo-serverside:
+	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.server_side --json
+demo-cowork:
+	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.cowork map
+
 demo-all: demo
+	@echo "" && echo "=== API / Console (claude-repro) ===" && $(MAKE) demo-api
+	@echo "" && echo "=== claude.ai export (desktop_chat) ===" && $(MAKE) demo-desktop
+	@echo "" && echo "=== claude.ai/IDE thumbs (server_side reference) ===" && $(MAKE) demo-serverside
+	@echo "" && echo "=== Cowork edge ===" && $(MAKE) demo-cowork
 	@echo "" && echo "=== fb-os demo ===" && $(MAKE) -C fb-os demo
 	@echo "" && echo "=== pps-pipeline demo ===" && $(MAKE) -C pps-pipeline demo
+
+# --- Activate /fb in your own Claude Code (the keystone) ----------------------
+install:
+	@$(PY) $(FBA)/scripts/install.py
+uninstall:
+	@$(PY) $(FBA)/scripts/install.py --uninstall
 
 # --- Tests --------------------------------------------------------------------
 test: test-fb-assist test-fb-os test-pps

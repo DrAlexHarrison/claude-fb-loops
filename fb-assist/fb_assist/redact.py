@@ -947,6 +947,32 @@ def leak_scan(bundle_text: str, use_gliner: bool = True) -> list[Finding]:
     return findings
 
 
+def deterministic_leak_scan(text: str) -> list[Finding]:
+    """The FP-resistant egress scan for RAW, un-redacted bytes — e.g. the live
+    session's on-disk transcript that ``/feedback`` would co-upload.
+
+    Runs ONLY the deterministic detectors: secrets + the PII regex floor + filesystem
+    paths + env-metadata (``cwd``/``gitBranch``/``commitSha``/IP) + proprietary-IP
+    markers. It deliberately omits the NER pass (Presidio/GLiNER), because over raw
+    JSONL the NER hallucinates PII from structural tokens (gotcha #2) — so a raw-bytes
+    gate built on NER would false-positive constantly. Catching paths + env + the
+    floor is exactly what the secret+PII-only floor missed: a content-rich live
+    session (file bodies, paths, cwd/gitBranch) now correctly trips the gate and
+    routes the user to checkpoint-then-submit.
+
+    Returns a deduped, severity-sorted list (empty == nothing a deterministic
+    detector can see in the raw bytes)."""
+    findings: list[Finding] = []
+    findings += scan_secrets(text)
+    findings += _scan_pii_regex(text)
+    findings += _scan_paths_text(text)
+    findings += _scan_env_leak_text(text)
+    findings += _scan_ip_markers(text)
+    findings = _dedup_for_report(findings)
+    findings.sort(key=lambda f: (-_SEV_RANK.get(f.severity, 1), f.start))
+    return findings
+
+
 def _dedup_for_report(findings: list[Finding]) -> list[Finding]:
     """Collapse identical spans across detectors, keeping the highest-severity /
     highest-score witness (but preserving distinct entities at the same location)."""
