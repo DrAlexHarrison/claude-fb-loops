@@ -1,11 +1,11 @@
 """End-to-end integration test: the three fb-assist modules COMPOSE into the real
 privacy-preserving feedback flow on a transcript carrying a PLANTED secret + PII.
 
-This is the proof that ToolExtract (``transcripts.py``), the redaction toolbox
-(``redact.py``), and ToolPackage (``package.py``) form one working pipeline — and
-it is the co-author Claude's playbook: the exact, validated call-sequence.
+This is the proof that the locator extractor (``transcripts.py``), the redaction
+toolbox (``redact.py``), and the packager (``package.py``) form one working
+pipeline — and it is the co-author's playbook: the exact, validated call-sequence.
 
-The flow validated here (spec §3, §5, §6, §9, §13, §15):
+The flow validated here:
 
   1. parse           transcripts.parse(path)                 -> records
   2. detect          transcripts.redaction_map(...)          -> WHERE each category lives
@@ -19,9 +19,9 @@ The flow validated here (spec §3, §5, §6, §9, §13, §15):
   7. verify          redact.leak_scan(bundle_text)           -> adversarial egress gate
 
 THE LOCATOR <-> REDACTION_MAP BRIDGE (the one real seam between the modules):
-  ToolExtract emits a *locator* per sensitive region:
+  transcripts.py emits a *locator* per sensitive region:
       {category, line, uuid, field, path, start, end, text, ...}   (Span.locator())
-  ToolPackage.diff_preview consumes a *redaction_map* of:
+  package.py's diff_preview consumes a *redaction_map* of:
       {uuid, category, original, replacement, count}
   They don't line up: a locator says "human_prompts lives at message.content of
   record U"; it does NOT say "an sk-ant key sits at chars 40..78 inside it". The
@@ -182,7 +182,7 @@ def build_planted_transcript() -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# THE BRIDGE: locator (ToolExtract) -> finding (redact) -> diff_preview entry. #
+# THE BRIDGE: locator (transcripts.py) -> finding (redact) -> diff_preview.    #
 # --------------------------------------------------------------------------- #
 # Categories we STRIP wholesale (bulk content the user doesn't want shipped at all).
 STRIP_CATEGORIES = [
@@ -197,15 +197,15 @@ KEEP_BUT_MASK = ["human_prompts", "assistant_text"]
 def _mask_narrative(raws: list[dict]) -> list[dict]:
     """In-place char-precise mask of secrets/PII inside the KEPT narrative fields.
 
-    For each located narrative Span (ToolExtract), run the detectors on its text
-    (redact), mask in place via the Span's path (transcripts.replace_span), and
-    return diff_preview-shaped redaction_map entries (ToolPackage). This is the
-    locator<->redaction_map bridge made concrete.
+    For each located narrative Span, run the detectors on its text (redact), mask
+    in place via the Span's path (transcripts.replace_span), and return
+    diff_preview-shaped redaction_map entries. This is the locator<->redaction_map
+    bridge made concrete.
     """
     redaction_map: list[dict] = []
     for i, raw in enumerate(raws):
         rec = T.Record(line=i + 1, raw=raw, type=str(raw.get("type", "")))
-        # Span objects carry the ToolExtract locator shape (.path/.start/.end/.uuid).
+        # Span objects carry the locator shape (.path/.start/.end/.uuid).
         spans = list(T.human_prompts([rec])) + list(T.assistant_text([rec]))
         for sp in spans:
             findings = R.scan_secrets(sp.text) + R.scan_pii(sp.text)
@@ -241,7 +241,7 @@ def run_privacy_flow(path: Path, backup_root: Path) -> dict:
     art["original_raws"] = original_raws
 
     # 2) DETECT — WHERE (locators) + WHAT (findings).
-    art["location_map"] = T.redaction_map(records)                # ToolExtract: where each category lives
+    art["location_map"] = T.redaction_map(records)                # where each category lives
     full_text = P.serialize_records(original_raws).decode("utf-8")
     art["pre_secrets"] = R.scan_secrets(full_text)
     art["pre_pii"] = R.scan_pii(full_text)
@@ -277,7 +277,7 @@ def run_privacy_flow(path: Path, backup_root: Path) -> dict:
     art["bundle_text"] = upload_text  # alias used by the literal-absence assertions
 
     # The CONTENT surface = description + the human-meaningful narrative, rendered via
-    # ToolExtract from the *sanitized* records. This — NOT the raw JSONL — is the right
+    # rendered from the *sanitized* records. This — NOT the raw JSONL — is the right
     # input for the NER egress gate (see step 7 note).
     san_recs = [T.Record(line=i + 1, raw=r, type=str(r.get("type", "")))
                 for i, r in enumerate(sanitized_raws)]
@@ -335,7 +335,7 @@ def test_parse_found_planted_secrets(flow):
 
 
 def test_location_map_locates_categories(flow):
-    """ToolExtract's redaction_map locates every planted category (the WHERE handoff)."""
+    """redaction_map locates every planted category (the WHERE handoff)."""
     art, _ = flow
     summ = art["location_map"]["summary"]
     for cat in ("human_prompts", "assistant_text", "file_contents", "bash_output"):
@@ -352,7 +352,7 @@ def test_planted_secrets_gone_from_sanitized(flow):
 
 
 def test_meaning_preserved(flow):
-    """The bug report's MEANING survives the char-precise mask (spec §6)."""
+    """The bug report's MEANING survives the char-precise mask."""
     art, _ = flow
     bundle = art["bundle_text"]
     assert "FREEZING" in bundle and "/feedback" in bundle
@@ -367,7 +367,7 @@ def test_leak_scan_clean(flow):
     Layer (a) — deterministic floor over the ACTUAL upload bytes — is the
     machine-decidable gate and must be empty. Layer (b) — NER leak_scan over the
     content surface — must surface none of the planted *values* (its remaining hits
-    are placeholder-label artifacts the co-author adjudicates; spec §9)."""
+    are placeholder-label artifacts the co-author adjudicates)."""
     art, _ = flow
     # (a) Deterministic floor over the real upload bytes — zero false positives.
     assert art["upload_secrets"] == [], \
@@ -382,7 +382,7 @@ def test_leak_scan_clean(flow):
 
 
 def test_diff_preview_shows_redactions(flow):
-    """diff_preview renders the gate summary and reflects real redactions (spec §9, §13)."""
+    """diff_preview renders the gate summary and reflects real redactions."""
     art, _ = flow
     pv = art["preview"]
     assert pv.bytes_after < pv.bytes_before          # structural strips shrank it
@@ -397,7 +397,7 @@ def test_diff_preview_shows_redactions(flow):
 
 def test_swap_restore_nondestructive(flow):
     """HARD: inside the swap the on-disk file IS the sanitized version with the
-    planted secret ABSENT; after, the original is restored byte-exact (spec §15)."""
+    planted secret ABSENT; after, the original is restored byte-exact."""
     art, path = flow
     # During the swap, /feedback would read exactly this:
     assert art["on_disk_during_swap"] == art["sanitized_bytes"]

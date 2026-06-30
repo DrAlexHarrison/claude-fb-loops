@@ -1,86 +1,15 @@
-"""fb_assist.reputation — the pseudonymous careful-filterer trust token (spec §13).
+"""fb_assist.reputation — pseudonymous reputation token for trusted feedback.
 
-WHAT THIS IS (the pseudonymous careful-filterer trust signal)
--------------------------------------------------------------
-A user who consistently submits high-quality, well-redacted feedback earns
-*reputation*. That reputation rides along with their feedback as a **pseudonymous,
-signed token** — so Anthropic's internal triage can weight a trusted contributor's
-signal HIGHER **without ever learning who they are**. Privacy-preserving trust.
+A user who submits well-redacted feedback earns reputation, carried as a signed,
+pseudonymous token — its only identifier is a one-way hash of a locally-generated
+public key, no PII — so Anthropic's triage can weight a trusted contributor higher
+without learning who they are. Signing prefers Ed25519 (asymmetric: the verifier needs
+only the public key) and falls back to HMAC-SHA256 (symmetric, needs a shared secret)
+when ``cryptography`` is absent.
 
-The token is, by construction:
-
-  * **pseudonymous** — it carries NO PII. The only stable identifier is a one-way
-    ``blake2b`` hash of a locally-generated *public* key (the ``pseudonymous_id``).
-    There is no email, no name, no path, no machine id — nothing that reverses to a
-    human. It links a user's *own* submissions to each other (so reputation can
-    accrue) but not to their real identity. Pseudonymity, deliberately, not anonymity.
-  * **verifiable** — it is signed. A verifier (Anthropic, server-side) recomputes the
-    signing bytes and checks the signature against the public key, confirming the
-    token is authentic and untampered. See :func:`verify_token`.
-  * **accumulating** — reputation grows as the user's contributions are accepted, with
-    honest diminishing returns and a hard cap. See :func:`record_acceptance`.
-  * **revocable** — a verifier can refuse any token whose ``pseudonymous_id`` is on a
-    revocation list, and a user can :func:`rotate_keys` to a fresh identity (carrying
-    reputation forward via a signature-chained migration assertion).
-
-CRYPTO BACKEND (asymmetric preferred; symmetric fallback)
----------------------------------------------------------
-* **Ed25519** (via ``cryptography``) when available — *real asymmetric* signing. The
-  signer holds the private key; the verifier needs only the **public** key, which is
-  safe to embed in the token. This is the production posture: Anthropic can verify a
-  token with nothing secret, and cannot forge a user's token.
-* **HMAC-SHA256** (stdlib) as a graceful fallback when ``cryptography`` is absent. This
-  is *symmetric*: verification requires the same secret used to sign, so the verifier
-  must hold a shared secret (registered out-of-band at enrollment) and the secret is
-  **never embedded** in the token. The public API is identical; only the trust model
-  differs, and that difference is surfaced in the token's ``backend`` field and in
-  :func:`verify_token`'s ``missing_verification_key`` reason. **Production uses the
-  asymmetric path** — the symmetric fallback exists only so the system is fully
-  functional on a stdlib-only box.
-
-THE LOCAL-vs-ANTHROPIC AUTHORITATIVE-SCORE BOUNDARY (read this)
---------------------------------------------------------------
-This module models the user's **local claim** of reputation and proves its
-**authenticity + integrity + key-binding**. It does NOT — and cannot — own the
-*authoritative* global score. In production:
-
-  * **Local (this module):** generates the identity, accrues a local
-    ``reputation_score`` from acceptances it observes, and mints a token that *claims*
-    that score, signed and bound to the effort signal.
-  * **Anthropic (server-side, the documented boundary):** runs :func:`verify_token` to
-    confirm the token is authentic/unrevoked/fresh and bound to *this* submission, then
-    weights by **its own authoritative count** of how many of this ``pseudonymous_id``'s
-    submissions it actually accepted. The user's self-claimed ``reputation_score`` is a
-    *hint*; the **verifiable floor** is "same pid, N accepted before" — which only
-    Anthropic can certify. A user inflating their local score gains nothing: the score
-    is bound to a pid Anthropic scores independently.
-
-So: everything provable from the token alone is built here; the single genuinely
-server-side piece — the authoritative global score — is the documented seam.
-
-CROSS-MACHINE SYNC
-------------------
-The keypair + reputation live in the existing profile store
-(``~/.config/fb-assist/profile.json`` — see :mod:`fb_assist.profile`), under a
-``reputation`` block. That file already rides the user's config sync across machines,
-so the *same* pseudonymous identity and accrued reputation follow the user everywhere
-with **no new sync infrastructure**. We reuse ``profile.load_profile`` /
-``profile.save_profile`` verbatim so the reputation block round-trips alongside the
-privacy ``rules`` / ``learned`` blocks without disturbing them.
-
-INTEGRATION SEAM (the effort-signal footer)
--------------------------------------------
-The existing effort signal (``fb_assist.package._render_effort_footer`` and every
-surface that builds one) already carries a ``reputation_token`` string field. The
-token here serializes to a compact URL-safe string via :func:`serialize_token`, and
-:func:`attach_reputation_token` drops that string straight into an effort-signal dict —
-shapes are compatible, ``package.py`` is untouched. :func:`verify_token` accepts either
-the dict or that compact string, so the server side can verify the footer value
-directly.
-
-Pure-stdlib core (``cryptography`` is an *optional* upgrade, never required). No network.
-Every entry point accepts an explicit ``profile`` / ``profile_path`` so callers and tests
-stay hermetic — the real ``~/.config/fb-assist/`` is touched only when nothing is supplied.
+This module proves a token's authenticity and the user's *local claim* of their score;
+the real trust floor is Anthropic's own server-side ledger of accepted submissions per
+pseudonymous id, not the self-claimed number (see :func:`verify_token`).
 """
 
 from __future__ import annotations
@@ -139,7 +68,7 @@ REPUTATION_CAP = 100.0
 REPUTATION_HALF_CREDITS = 10.0
 
 # Default freshness window for verification: a token older than this (or dated in the
-# future beyond the skew) is stale. 7 days mirrors the spec's request-id server-log window.
+# future beyond the skew) is stale. 7 days mirrors a typical server-side request-log retention window.
 DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600
 DEFAULT_FUTURE_SKEW_SECONDS = 300  # tolerate small clock skew on the issuer side
 
@@ -407,18 +336,15 @@ def _quality_weight(quality: Any, effort_signal: Optional[Mapping[str, Any]]) ->
     q = quality
     if q is None and effort_signal:
         q = effort_signal.get("quality")
-    if q is None:
-        weight = 0.7  # neutral default for an accepted-but-unrated submission
-    else:
+    weight = 0.7  # neutral default for an unrated or non-numeric quality
+    if q is not None:
         try:
             qf = float(q)
         except (TypeError, ValueError):
-            qf = 0.7
+            pass  # non-numeric quality -> keep the neutral default
         else:
-            if qf >= 1.0:          # an N-of-5 self-rating (codebase convention)
-                weight = min(1.0, qf / 5.0)
-            else:                  # already a 0..1 fraction
-                weight = max(0.0, qf)
+            # q >= 1 is an N-of-5 self-rating (5->1.0, 4->0.8, 1->0.2); 0<q<1 is a fraction.
+            weight = min(1.0, qf / 5.0) if qf >= 1.0 else max(0.0, qf)
     # A demonstrably clean privacy floor is the core "careful filterer" signal — small bonus.
     if effort_signal:
         summary = effort_signal.get("summary") or {}
@@ -851,7 +777,7 @@ def _cli_rotate(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="fb_assist.reputation",
-        description="fb-assist pseudonymous reputation token (spec §13)",
+        description="fb-assist pseudonymous reputation token",
     )
     sub = p.add_subparsers(dest="cmd", required=True)
 

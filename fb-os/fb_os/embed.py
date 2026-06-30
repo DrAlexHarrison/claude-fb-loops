@@ -1,6 +1,6 @@
 """fb_os.embed — local, deterministic text embeddings (no network, no heavy deps).
 
-The plan's production embedder is a local sentence-transformer (BGE-M3 / all-MiniLM
+The intended production embedder is a local sentence-transformer (BGE-M3 / all-MiniLM
 via ``sentence-transformers``). Those weights are a multi-hundred-MB download, so on
 a metered uplink the **CORE falls back to a deterministic stdlib feature-hashing
 vectorizer** (the "hashing-trick" TF vectorizer): tokenise -> hash each token into a

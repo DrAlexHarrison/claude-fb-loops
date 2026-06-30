@@ -46,11 +46,11 @@ jobs:
           key: models-${{ runner.os }}-${{ hashFiles('fb-assist/fb_assist/redact.py') }}
           restore-keys: models-${{ runner.os }}-
 
-      - name: Install packages (fb-assist first; fb-os/pps depend on it)
+      - name: Install packages (fb-assist first; fb-os depends on it)
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ./fb-assist
-          python -m pip install -e ./fb-os -e ./pps-pipeline
+          python -m pip install -e ./fb-os
           python -m spacy download en_core_web_sm
 
       - name: Generate synthetic fixtures
@@ -61,9 +61,6 @@ jobs:
 
       - name: fb-os suite
         run: cd fb-os && python -m pytest -q
-
-      - name: pps-pipeline suite
-        run: cd pps-pipeline && python -m pytest -q
 
       - name: make demo (download-free smoke)
         run: make demo

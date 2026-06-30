@@ -1,30 +1,18 @@
-"""fb_os.triager — THE keystone: the producer of ``open-questions.json``.
+"""fb_os.triager — the producer of ``open-questions.json``.
 
-Reads each (non-suppressed) cluster's representative artifacts plus the running
-open-questions and emits:
+Reads each non-suppressed cluster plus the running open-questions and emits a
+per-artifact triage record, a per-cluster theme summary, and a candidate
+open-question merged into the prior set with stable ids.
 
-  (a) a **per-artifact triage record** (category / route / priority / dup_of),
-  (b) a per-cluster **theme summary**, and
-  (c) a candidate **open-question** that, merged into the prior set with stable ids,
-      becomes the living ``open-questions.json`` the CLI consumes.
+The LLM backend is pluggable: :class:`MockTriagerBackend` replays a
+canned-response file with a deterministic heuristic fallback (free, what
+tests and ``make demo`` use); :class:`ClaudeHeadlessBackend` is the real
+producer, headless Claude under Max auth (no metered spend). Either way, the
+triager coerces the result against the fixed label sets — it never invents a
+category, route, or priority outside the declared ones.
 
-The LLM backend is **pluggable**:
-
-  * :class:`MockTriagerBackend` — **record/replay** from a small canned-response file
-    (keyed by a stable cluster *signature*), with a deterministic heuristic fallback
-    so the loop closes on freshly-generated clusters. **Free + deterministic** — this
-    is what tests and ``make demo`` use. No network, no paid software.
-  * :class:`ClaudeHeadlessBackend` — the real producer: headless Claude via Max auth
-    (``claude -p``), the same pattern Build 3 uses (**no metered spend**). Documented
-    + pluggable; never invoked by tests/demo.
-
-Whatever a backend returns, the triager **validates against the fixed label sets**
-(``CATEGORIES`` / ``ROUTES``) and coerces anything out-of-set — the "never invent
-labels" guarantee holds regardless of backend behaviour.
-
-Effort-weighting (the JD's "signal quality" made mechanical) lives here too:
-:func:`cluster_priority` raises a cluster's question-priority when its members carry
-high ``quality`` / ``alignment_confidence`` and a ``reputation_token``.
+Effort-weighting ("signal quality" made mechanical) lives here too: see
+:func:`cluster_priority`.
 """
 
 from __future__ import annotations
@@ -80,8 +68,8 @@ def effort_weight(effort_signals: Sequence[dict]) -> float:
 
     High ``quality`` / ``alignment_confidence`` (rated ~1..5) and the presence of a
     ``reputation_token`` (a careful, trusted filterer) push the weight up; their
-    absence pushes it toward the floor. This is the JD's "signal quality" metric
-    made mechanical (plan §4.3)."""
+    absence pushes it toward the floor. This is the "signal quality" idea made
+    mechanical."""
     if not effort_signals:
         return 1.0
     q_vals, a_vals, rep = [], [], 0
@@ -206,9 +194,9 @@ class MockTriagerBackend(TriagerBackend):
 
 class ClaudeHeadlessBackend(TriagerBackend):
     """Real producer: headless Claude (``claude -p``) under Max auth — no metered
-    spend, same pattern Build 3 uses. **Documented + pluggable; never used by tests
-    or ``make demo``** (those must be free + deterministic). Wire it via
-    ``--backend claude`` in production."""
+    spend. Documented + pluggable; never used by tests or ``make demo`` (those
+    must be free + deterministic). Wire it via ``--backend claude`` in
+    production."""
 
     def __init__(self, model: str = "claude-opus-4-8", timeout: int = 120):
         self.model = model
@@ -358,7 +346,7 @@ class Triager:
     def _apply_answers(self, qset: OpenQuestionSet, triage_records: list[dict]) -> None:
         """Close the loop: any non-quarantined artifact that carries
         ``answers_question_id`` flips that question to ``answered`` and lowers its
-        uncertainty (plan §3, the LOOP CLOSED step)."""
+        uncertainty."""
         for a in self.store.artifacts(include_quarantined=False):
             qid = a.get("answers_question_id")
             if qid:

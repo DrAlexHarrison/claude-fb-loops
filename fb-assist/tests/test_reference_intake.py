@@ -1,6 +1,6 @@
 """Tests for fb_assist.reference_intake — the reference /v1/feedback intake endpoint.
 
-Mirrors test_server_side.py / test_claude_repro.py style. We plant pattern-valid FAKE
+Mirrors test_claude_repro.py style. We plant pattern-valid FAKE
 secrets + real-shaped PII into a Messages-API pair, run it through the REAL
 claude_repro SDK to produce a privacy-clean artifact, then assert the intake's
 contract end-to-end:

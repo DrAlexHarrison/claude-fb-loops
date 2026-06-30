@@ -280,8 +280,8 @@ def test_recover_noop_when_empty(tmp_path):
 
 
 def test_recover_only_paths_leaves_other_sessions(tmp_path):
-    """#3: a scoped recover restores only journals that swap a given path — it must not
-    un-swap a concurrent session's still-staged journal (the S2 restart-restore edge)."""
+    """A scoped recover restores only journals that swap a given path — it must not
+    un-swap a concurrent session's still-staged journal."""
     shared_bk = tmp_path / "bk"
     a = tmp_path / "sessA.jsonl"; a.write_bytes(b"ORIG-A\n")
     b = tmp_path / "sessB.jsonl"; b.write_bytes(b"ORIG-B\n")
@@ -357,7 +357,7 @@ def test_begin_swap_orphan_recovered_by_recover(tmp_path):
 
 
 def test_begin_swap_refuses_live_session_by_id(tmp_path):
-    """FIX 3: the target whose filename stem == the live session_id is refused
+    """The target whose filename stem == the live session_id is refused
     outright (Claude Code writes per-turn, so is_being_written false-negatives
     BETWEEN turns). The heuristic stays as a secondary guard."""
     sid = "abcd1234-live-session"
@@ -375,9 +375,9 @@ def test_begin_swap_refuses_live_session_by_id(tmp_path):
 
 
 def test_begin_swap_journals_and_restores_window_mtimes(tmp_path):
-    """FIX 2: windowing OTHER transcripts out of /feedback's gather is journaled, so
-    finish_swap/recover undo the mtime edits too (the crash-self-healing guarantee
-    was previously FALSE for windowing)."""
+    """Windowing OTHER transcripts out of /feedback's gather is journaled, so
+    finish_swap/recover undo the mtime edits too — the crash-self-healing
+    guarantee extends to windowing as well."""
     target = tmp_path / "target.jsonl"
     target.write_bytes(P.serialize_records(make_records(3, session="t")))
     other = tmp_path / "other-recent.jsonl"
@@ -401,7 +401,7 @@ def test_begin_swap_journals_and_restores_window_mtimes(tmp_path):
 
 
 def test_begin_swap_window_out_recovered_after_crash(tmp_path):
-    """FIX 2 under a real crash: recover() restores BOTH the swapped target and the
+    """Under a real crash, recover() restores BOTH the swapped target and the
     windowed-out file's mtime from the durable journal."""
     target = tmp_path / "target.jsonl"
     original = P.serialize_records(make_records(3, session="t"))

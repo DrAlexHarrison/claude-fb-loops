@@ -8,7 +8,7 @@ Licensed under the Apache License, Version 2.0 (see LICENSE).
 Dependency license posture
 ================================================================================
 
-The three packages in this repository (fb-assist, fb-os, pps-pipeline) have a
+The two packages in this repository (fb-assist, fb-os) have a
 deliberately light, permissively-licensed dependency surface. The runnable core
 of each package is stdlib-only and degrades gracefully when optional heavy
 dependencies are absent.

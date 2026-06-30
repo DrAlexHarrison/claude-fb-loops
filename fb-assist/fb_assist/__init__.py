@@ -1,9 +1,8 @@
-"""fb-assist — privacy-preserving feedback co-authoring toolbox (Build 3).
+"""fb-assist — privacy-preserving feedback co-authoring toolbox.
 
-See ../01-build3-fb-assist-spec.md for the full design. The first building block
-is :mod:`fb_assist.transcripts` — the streaming session-transcript extraction
-engine that locates any category of content (with precise uuid+field+char-span
-locators) for the co-author and the redaction module to act on.
+:mod:`fb_assist.transcripts` is the streaming session-transcript extraction engine
+that locates any category of content (with precise uuid+field+char-span locators)
+for the co-author and the redaction module to act on.
 """
 
 from . import transcripts  # noqa: F401

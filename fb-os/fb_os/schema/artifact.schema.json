@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fb-loops.example/fb-os/artifact.schema.json",
   "title": "artifact.json",
-  "description": "The inbound bundle manifest (Build 3 stage_review -> Build 1 ingest). Additive: ingest tolerates its absence and derives every field from description.txt + effort-signal.json + *.jsonl.",
+  "description": "The inbound bundle manifest (fb-assist stage_review -> fb-os ingest). Additive: ingest tolerates its absence and derives every field from description.txt + effort-signal.json + *.jsonl.",
   "type": "object",
   "required": ["schema_version", "artifact_id"],
   "additionalProperties": true,

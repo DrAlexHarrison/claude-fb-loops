@@ -25,7 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 # Voice push-to-talk confirm (Super+V). Local faster-whisper, CPU.
 voice = ["faster-whisper", "sounddevice"]
-# The claude-repro API SDK surface (Build B).
+# The claude-repro API SDK surface.
 api = ["anthropic>=0.40"]
 dev = ["pytest>=8"]
 all = ["fb-assist[voice,api,dev]"]

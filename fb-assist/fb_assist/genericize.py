@@ -1,38 +1,13 @@
-"""fb_assist.genericize — the genericize/distill guardrails (the SEMANTIC ceiling).
+"""fb_assist.genericize — the genericize/distill guardrails (the semantic ceiling).
 
-Why this module exists
-----------------------
-``redact.py`` is the DETERMINISTIC floor: it catches *patterns* (keys, emails,
-SSNs, paths, env-metadata). But the highest-risk leaks are *semantic* company IP —
-"the patient in Room 11", an internal codename, a proprietary algorithm, a named
-customer. No regex or NER reliably catches those; only a model with full context
-does. In the real product the co-author IS Opus, already holding the user's whole
-session, and **it writes the genericized rewrite itself** (spec §6/§8). So the
-rewrite is not this module's job, and this module calls **no LLM**.
+``redact.py`` is the deterministic floor, catching patterns (keys, emails, paths).
+The highest-risk leaks are semantic — a codename, a named customer — and only a
+model with full context can write that rewrite, so this module calls no LLM.
+It verifies instead: prove no original secret/PII value survives the rewrite
+verbatim, and flag (never gate on) meaning risk like dropped error codes or a
+drastically shorter result. Meaning-preservation stays the user's call.
 
-What this module DOES is the verification bar the spec mandates around that
-human/Claude rewrite (spec §7/§8 — "Genericize verification bar, two-pass, before
-ship"):
-
-  1. **Prove no leak survived** — adversarially re-scan the *generic* text
-     (``redact.leak_scan``) and prove that no sensitive VALUE from the *original*
-     made it through verbatim. This is the machine-decidable ``ok`` verdict.
-  2. **Flag meaning risk** — heuristically surface load-bearing tokens (error
-     codes, ALL-CAPS markers, quoted strings, crash/timeout-ish words) that the
-     rewrite dropped, and warn when the rewrite is drastically shorter than the
-     original. These are SIGNALS for the co-author and the user — never gates.
-
-The sacred line (= the anti-impersonation principle, spec §6): meaning-PRESERVATION
-is the *user's* call, surfaced for confirmation downstream. This module may FLAG
-meaning risk; it must **never** veto on meaning, and it must **never** auto-ship.
-``verify_genericization`` decides only "did a leak survive?" — nothing else.
-
-The two ``distill_*`` functions are the faithful-summary appliers ("distill" =
-replace an exchange with a faithful summary, spec §5/§8). They APPLY and RETURN a
-sanitized copy; the result is ALWAYS surfaced to the user for confirmation before
-any swap/ship. They are pure (operate on copies; never mutate the caller's input).
-
-LOCAL ONLY. No network, no LLM, stdlib + the sibling fb_assist modules only.
+Local only. No network, no LLM, stdlib + the sibling fb_assist modules only.
 """
 
 from __future__ import annotations
@@ -91,25 +66,25 @@ def verify_genericization(original: str, generic: str, *,
     Returns::
 
         {
-          "reid_findings":       [Finding.to_dict(), ...],  # leak_scan(generic): can the
+          "reid_findings":      [Finding.to_dict(), ...],  # leak_scan(generic): can the
                                                             # company/person/IP be recovered?
-          "leaked_originals":    [Finding.to_dict(reveal=True), ...],  # secret/PII VALUES from
-                                                            # `original` still present VERBATIM in
-                                                            # `generic` — MUST be empty for a pass
-          "expect_absent_hits":  [{"literal": str, "count": int}, ...],  # caller-named codenames /
+          "leaked_originals":   [Finding.to_dict(reveal=True), ...],  # secret/PII values from
+                                                            # `original` still present verbatim in
+                                                            # `generic` — must be empty for a pass
+          "expect_absent_hits": [{"literal": str, "count": int}, ...],  # caller-named codenames /
                                                             # IP strings still present in `generic`
-          "meaning_risk_flags":  [{"kind": str, ...}, ...], # load-bearing tokens dropped /
-                                                            # rewrite drastically shorter (SIGNALS)
-          "ok":                  bool,                       # leaked_originals empty AND
-                                                            # expect_absent_hits empty AND no
+          "meaning_risk_flags": [{"kind": str, ...}, ...], # load-bearing tokens dropped /
+                                                            # rewrite drastically shorter (signals)
+          "ok":                 bool,                      # leaked_originals empty and
+                                                            # expect_absent_hits empty and no
                                                             # high-severity reid finding
         }
 
-    ``ok`` is the machine-decidable "no leak survived" verdict — and ONLY that.
-    Meaning-PRESERVATION is the user's confirm (sacred); this function never vetoes
-    on ``meaning_risk_flags``. ``leaked_originals`` carries the *literal* surviving
-    value (``reveal=True``) because it is the actionable fix-list the co-author
-    needs to know exactly what to remove — it is consumed locally, never shipped.
+    ``ok`` is the machine-decidable "no leak survived" verdict, and only that —
+    meaning-preservation is the user's call, and this function never vetoes on
+    ``meaning_risk_flags``. ``leaked_originals`` carries the literal surviving
+    value (``reveal=True``) because it's the fix-list the co-author needs; it's
+    consumed locally and never shipped.
     """
     # Pass 1a — adversarial re-identification: re-run the full egress gate over the
     # GENERIC text. Anything it still finds is recoverable from what would ship.
@@ -175,7 +150,7 @@ def _expect_absent_hits(literals: list[str], generic: str) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
-# meaning-risk heuristic (SIGNALS for the co-author/user — never a gate)
+# meaning-risk heuristic (signals for the co-author/user — never a gate)
 # --------------------------------------------------------------------------- #
 # Small, tasteful set of "load-bearing" words: if the original named one of these
 # and the rewrite dropped it, the bug/request may have lost its teeth. Kept lower-
@@ -249,7 +224,7 @@ def _meaning_risk_flags(original: str, generic: str) -> list[dict]:
 # distill — replace verbose content with a faithful summary (appliers, not LLM)
 # --------------------------------------------------------------------------- #
 def distill_apply(records: list[dict], span: Span, summary: str) -> list[dict]:
-    """Replace ONE located ``span``'s text with a faithful ``summary``.
+    """Replace one located ``span``'s text with a faithful ``summary``.
 
     Splices ``summary`` into ``span``'s field at ``[span.start:span.end]`` via
     ``transcripts.replace_span`` (whole-field if the span covers the whole value).
@@ -257,8 +232,8 @@ def distill_apply(records: list[dict], span: Span, summary: str) -> list[dict]:
     span's record is located by ``uuid`` (falling back to path+text match).
 
     Pure: operates on a deep copy, returns the mutated copy, leaves ``records``
-    untouched. The distilled result is ALWAYS surfaced to the user for confirmation
-    downstream — this only APPLIES and RETURNS, it never ships.
+    untouched. The distilled result is always surfaced to the user for confirmation
+    downstream — this only applies and returns, it never ships.
     """
     out = copy.deepcopy(records)
     idx = _locate_record(out, span)
@@ -304,7 +279,7 @@ def _locate_record(records: list[dict], span: Span) -> Optional[int]:
 def distill_turn_range(records: list[dict], start_idx: int, end_idx: int,
                        summary: str) -> list[dict]:
     """Collapse a contiguous record range ``[start_idx, end_idx]`` (inclusive,
-    0-based into ``records``) into a SINGLE faithful summary record.
+    0-based into ``records``) into a single faithful summary record.
 
     The verbose exchange is replaced by one synthesized ``user`` record carrying
     ``summary`` as its message content, with the envelope (sessionId / timestamp /
@@ -313,7 +288,7 @@ def distill_turn_range(records: list[dict], start_idx: int, end_idx: int,
     (``fbAssistDistilled``) so it is never mistaken for a real human turn.
 
     Pure: operates on a deep copy; ``records`` is left untouched. The result is
-    ALWAYS surfaced to the user for confirmation downstream — applies + returns only.
+    always surfaced to the user for confirmation downstream — applies + returns only.
     """
     n = len(records)
     if not (0 <= start_idx <= end_idx < n):

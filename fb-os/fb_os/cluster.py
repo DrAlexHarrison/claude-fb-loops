@@ -1,6 +1,6 @@
 """fb_os.cluster — the local "Clio repro" clustering pass (lightweight core).
 
-The plan's production engine is **BERTopic** (SBERT -> UMAP -> HDBSCAN -> c-TF-IDF),
+The intended production engine is **BERTopic** (SBERT -> UMAP -> HDBSCAN -> c-TF-IDF),
 the OSS reproduction of Anthropic's Clio. BERTopic + UMAP + HDBSCAN are heavy
 downloads, so the **CORE ships a deterministic, dependency-free reproduction of the
 same *shape*** that runs anywhere with zero new packages:
@@ -126,8 +126,8 @@ def cluster_artifacts(
     """Cluster artifacts (each a dict with ``artifact_id`` + ``embedding``).
 
     Deterministic: artifacts are processed in a stable ``artifact_id`` order, so the
-    same input always yields the same clusters (the plan's "pinned seed" guarantee,
-    achieved without an RNG). Returns a list of cluster dicts::
+    same input always yields the same clusters — a stand-in for a pinned random
+    seed, achieved without an RNG. Returns a list of cluster dicts::
 
         {cluster_id, label, keywords, centroid, size, suppressed, members:[ids],
          dup_map:{id:canonical}}

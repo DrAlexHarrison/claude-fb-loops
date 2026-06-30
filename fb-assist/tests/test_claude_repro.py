@@ -1,9 +1,9 @@
-"""Tests for fb_assist.claude_repro — the `claude-repro` API SDK surface (Build B).
+"""Tests for fb_assist.claude_repro — the `claude-repro` API SDK surface.
 
 Mirrors test_redact.py / test_package.py style: plant pattern-valid FAKE secrets +
 real-shaped PII into a Messages API request/response, then assert byte-absence of
-every sentinel from the sanitized bundle, the request-id anchor extraction (FIX 5,
-incl. the Bedrock deterministic fallback), the FIX-6 preview built from the
+every sentinel from the sanitized bundle, the request-id anchor extraction
+(incl. the Bedrock deterministic fallback), the preview built from the
 redaction map, Message.text leniency on both shapes, and the draft embedding.
 
 USE_TF=0 is forced before any import so transformers' TF path can't break under
@@ -170,7 +170,7 @@ def test_narrative_spans_locate_all_categories():
 
 
 # --------------------------------------------------------------------------- #
-# FIX 5 — the verifiable request-id anchor
+# The verifiable request-id anchor
 # --------------------------------------------------------------------------- #
 class _FakeMessage:
     """Mimics an SDK Message: the public per-response `_request_id` attribute that
@@ -214,7 +214,7 @@ def test_anchor_first_party_request_id_is_verifiable():
 
 
 def test_anchor_bedrock_falls_back_to_deterministic():
-    # FIX 5 Bedrock/Vertex branch: header absent -> deterministic, NOT verifiable.
+    # Bedrock/Vertex branch: header absent -> deterministic, NOT verifiable.
     resp = {"id": "msg_bedrock", "model": "claude-x", "usage": {"input_tokens": 5, "output_tokens": 2}}
     a = CR.anchor_for({"model": "claude-x"}, resp, None, provider="bedrock")
     assert a["type"] == "deterministic"
@@ -240,7 +240,7 @@ def test_artifact_request_id_only_set_when_verifiable():
 
 
 # --------------------------------------------------------------------------- #
-# FIX 6 — preview built from the redaction_map, NOT diff_preview
+# Preview built from the redaction_map, NOT diff_preview
 # --------------------------------------------------------------------------- #
 def test_preview_built_from_rmap_shows_per_category_counts(artifact):
     pv = artifact.preview
@@ -271,7 +271,7 @@ def test_preview_from_rmap_direct():
 
 
 # --------------------------------------------------------------------------- #
-# Message.text leniency — array-of-blocks AND bare-text (00-MANDATORY-FIXES tail)
+# Message.text leniency — array-of-blocks AND bare-text
 # --------------------------------------------------------------------------- #
 def test_message_text_content_array_shape():
     msg = {"content": [{"type": "text", "text": "hello "},
@@ -298,7 +298,7 @@ def test_message_text_missing_is_empty():
 
 
 # --------------------------------------------------------------------------- #
-# Ring-buffer wrapper + report_last (FIX 5 capture path, no network)
+# Ring-buffer wrapper + report_last (capture path, no network)
 # --------------------------------------------------------------------------- #
 class _FakeInnerMessages:
     """Stands in for the real `messages` resource — no network."""
@@ -350,7 +350,7 @@ def test_report_last_empty_ring_raises():
 
 
 def test_streaming_capture_uses_stream_request_id_header():
-    """FIX 5 streaming path: get_final_message() snapshot may lack _request_id;
+    """Streaming path: get_final_message() snapshot may lack _request_id;
     the wrapper reads stream.request_id (the header)."""
     class _FakeStream:
         request_id = "req_streamHDR"
@@ -506,9 +506,8 @@ def test_cli_redact_subcommand(tmp_path, capsys):
 
 
 def test_floor_sweep_catches_pii_in_nonnarrative_fields():
-    """M2: the hard-gate floor must catch email / IPv4 / US-SSN that live OUTSIDE
-    narrative spans (a metadata leaf, a structured response field) — not just secrets.
-    Before the fix, hard_gate_pass returned True with one of these still in the bytes."""
+    """The hard-gate floor must catch email / IPv4 / US-SSN that live OUTSIDE
+    narrative spans (a metadata leaf, a structured response field) — not just secrets."""
     from fb_assist import redact as R
     root = {
         "request": {"metadata": {"contact": "leak.me@corp.example", "ip": "203.0.113.7"}},

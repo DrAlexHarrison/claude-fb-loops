@@ -1,5 +1,5 @@
 # claude-fb-loops — privacy-preserving feedback co-author for Claude.
-# A monorepo of three installable packages: fb-assist (the keystone), fb-os, pps-pipeline.
+# Two installable packages: fb-assist (the keystone) and fb-os (the org-wide loop).
 #
 # The headline is `make demo`: watch fb-assist redact a planted-secret session
 # end-to-end — download-free, offline, in seconds.
@@ -10,16 +10,16 @@ export USE_TF := 0
 export USE_FLAX := 0
 export TOKENIZERS_PARALLELISM := false
 
-.PHONY: help demo demo-all demo-api demo-desktop demo-serverside demo-cowork \
-        install uninstall test test-fb-assist test-fb-os test-pps \
+.PHONY: help demo demo-all demo-api \
+        install uninstall test test-fb-assist test-fb-os \
         fixtures setup lint scrub-gate clean
 
 help:
 	@echo "claude-fb-loops targets:"
 	@echo "  make demo        — fb-assist redacts a planted-secret session, end-to-end (no network, no downloads)"
-	@echo "  make demo-all    — every surface's demo (CLI + the 4 thin edges + fb-os + pps-pipeline)"
+	@echo "  make demo-all    — every surface's demo (CLI + the API edge + fb-os)"
 	@echo "  make install     — activate /fb: install the skill + register the MCP server (idempotent)"
-	@echo "  make test        — run all three test suites (needs 'make setup' for fb-assist's NER recall tests)"
+	@echo "  make test        — run both test suites (needs 'make setup' for fb-assist's NER recall tests)"
 	@echo "  make fixtures     — (re)generate the synthetic fb-assist fixtures"
 	@echo "  make setup       — install the packages + NER stack + spaCy model (HEAVY — see banner)"
 	@echo "  make scrub-gate  — assert NO real personal data (real home paths etc.) in tracked files"
@@ -30,23 +30,13 @@ help:
 demo:
 	@PYTHONPATH=$(FBA) $(PY) $(FBA)/examples/demo.py
 
-# Per-surface demos — each runs off a built-in synthetic fixture, offline, no install.
+# Per-surface demo — runs off a built-in synthetic fixture, offline, no install.
 demo-api:
 	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.claude_repro demo
-demo-desktop:
-	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.desktop_chat
-demo-serverside:
-	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.server_side --json
-demo-cowork:
-	@PYTHONPATH=$(FBA) $(PY) -m fb_assist.cowork map
 
 demo-all: demo
 	@echo "" && echo "=== API / Console (claude-repro) ===" && $(MAKE) demo-api
-	@echo "" && echo "=== claude.ai export (desktop_chat) ===" && $(MAKE) demo-desktop
-	@echo "" && echo "=== claude.ai/IDE thumbs (server_side reference) ===" && $(MAKE) demo-serverside
-	@echo "" && echo "=== Cowork edge ===" && $(MAKE) demo-cowork
 	@echo "" && echo "=== fb-os demo ===" && $(MAKE) -C fb-os demo
-	@echo "" && echo "=== pps-pipeline demo ===" && $(MAKE) -C pps-pipeline demo
 
 # --- Activate /fb in your own Claude Code (the keystone) ----------------------
 install:
@@ -55,17 +45,14 @@ uninstall:
 	@$(PY) $(FBA)/scripts/install.py --uninstall
 
 # --- Tests --------------------------------------------------------------------
-test: test-fb-assist test-fb-os test-pps
-	@echo "" && echo "All three suites passed."
+test: test-fb-assist test-fb-os
+	@echo "" && echo "Both suites passed."
 
 test-fb-assist: fixtures
 	@echo "== fb-assist ==" && cd $(FBA) && USE_TF=0 $(PY) -m pytest -q
 
 test-fb-os:
 	@echo "== fb-os ==" && cd fb-os && USE_TF=0 $(PY) -m pytest -q
-
-test-pps:
-	@echo "== pps-pipeline ==" && cd pps-pipeline && USE_TF=0 $(PY) -m pytest -q
 
 # --- Synthetic fixtures (deterministic; never committed) ----------------------
 fixtures:
@@ -81,14 +68,12 @@ setup:
 	@echo "   'make demo' needs NONE of this — it runs offline from source."
 	@echo "================================================================"
 	$(PY) -m pip install -e ./$(FBA)
-	$(PY) -m pip install -e ./fb-os -e ./pps-pipeline
+	$(PY) -m pip install -e ./fb-os
 	$(PY) -m spacy download en_core_web_sm
 
 # --- Privacy scrub-gate (the publish guard) -----------------------------------
 # Asserts NO real personal data survives in the files git would ship. The binding
 # check is real-home-paths == 0; a few never-appear identifiers are belt-and-braces.
-# (The `.claude-michelle` -> "michelle" account-label in the frozen locate module
-#  is an intentional, documented config convention and is NOT a personal leak.)
 scrub-gate:
 	@$(PY) scripts/scrub_gate.py
 

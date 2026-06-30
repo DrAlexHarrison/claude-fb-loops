@@ -1,11 +1,11 @@
-"""Tests for fb_assist.watcher — the frustration/delight signal-capture hook (§11).
+"""Tests for fb_assist.watcher — the frustration/delight signal-capture hook.
 
 Hermetic: every test points the state dir and the disable-file at ``tmp_path`` via
 env overrides, so nothing touches the real ``/tmp`` state or ``~/.config``. The
 pure detectors are tested directly; the hook glue is driven end-to-end by feeding
 a JSON payload on a monkeypatched ``sys.stdin`` and asserting the stdout nudge.
 
-The contract under test is precision-first §11 behavior: detect the right moments,
+The contract under test is precision-first behavior: detect the right moments,
 offer ONCE, never nag, fully disable-able, pre-draft for one-tap /fb — and the hook
 must ALWAYS return 0 and NEVER raise.
 """

@@ -1,21 +1,16 @@
 """fb_os.ingest — a ``stage_review`` bundle -> a normalized ``FeedbackArtifact`` row.
 
-Reuses Build 3's toolbox at every step (the literal "one platform" reuse):
-
-  * ``fb_assist.package.parse_jsonl``        — read the redacted transcript substrate,
-  * ``fb_assist.transcripts``                — (validate parse; extract if needed),
-  * the inverse of ``package._render_effort_footer`` — recover the effort-signal from
-    a ``description.txt`` footer when no ``effort-signal.json`` sidecar is present,
-  * ``fb_assist.redact.leak_scan``           — re-run the leak-scan **floor** on the
-    way in (defense-in-depth: the artifact is already redacted, but the OS never
-    trusts blindly). A blocking hit **quarantines** the bundle — it is stored but
-    NEVER embedded, clustered, or shown.
+Reuses the CLI package's toolbox: ``parse_jsonl`` to read the redacted
+transcript substrate, and ``redact.leak_scan`` re-run as a defense-in-depth
+floor on the way in — the artifact is already redacted, but ingest never
+trusts that blindly. A blocking hit quarantines the bundle; it is stored but
+never embedded, clustered, or shown.
 
 The inbound unit is a directory ``inbox/<artifact_id>/`` written by
-``Payload.stage`` (``description.txt`` + per-session ``.jsonl`` + ``effort-signal.json``).
-Build 1 adds one **additive, optional** file, ``artifact.json`` (the manifest). When
-it is absent, every field is **derived** from the three files Build 3 already writes
-(plan §4.1) — so no Build-3 change is required for the core.
+``Payload.stage``. An optional, additive ``artifact.json`` manifest can
+declare fields explicitly; when absent, every field is derived from the
+files the CLI package already writes, so no change to that package is
+required for the core.
 """
 
 from __future__ import annotations
@@ -48,7 +43,7 @@ _FOOTER_KEYMAP = {
 def strip_effort_footer(description: str) -> str:
     """Return the distilled feedback text with the effort-signal footer removed.
 
-    Build 3 appends ``\\n\\n---\\n[fb-assist effort signal] ...`` to ``description.txt``;
+    The CLI package appends ``\\n\\n---\\n[fb-assist effort signal] ...`` to ``description.txt``;
     that metadata must NOT pollute the embedding/clustering vocabulary, so ingest
     stores only the text above the footer (the actual co-authored feedback)."""
     out: list[str] = []
@@ -116,7 +111,7 @@ def _bundle_files(bundle_dir: Path) -> dict:
 
 
 def derive_manifest(bundle_dir: PathLike) -> dict:
-    """Build the artifact manifest for a bundle — **present-or-derive** (plan §4.1).
+    """Build the artifact manifest for a bundle — present-or-derive.
 
     If ``artifact.json`` exists it is loaded + schema-validated; any absent field is
     backfilled from the other files. If it is absent, every field is derived from
@@ -240,7 +235,7 @@ def ingest_bundle(
     description = strip_effort_footer(description_full)
 
     # Validate the transcript actually parses through fb_assist (it is the redacted
-    # substrate Build 3 wrote; a malformed one is itself a red flag). Scan the FULL
+    # substrate the CLI package wrote; a malformed one is itself a red flag). Scan the FULL
     # text (footer + transcript) for leaks, but store only the distilled description.
     transcript_text_parts = [description_full]
     parse_ok = True

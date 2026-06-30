@@ -1,8 +1,9 @@
 """The seam test — the point of the whole build.
 
-Build 1 publishes open-questions.json; the shared selector (the same one Build 3
-imports) consumes it and returns exactly one applicable probe for a CLI report and
-None when nothing is relevant. Plus schema round-trip in BOTH directions.
+The org-side package publishes open-questions.json; the CLI package reimplements
+the same selector, pinned by this seam test, and returns exactly one applicable
+probe for a CLI report and None when nothing is relevant. Plus schema round-trip
+in BOTH directions.
 """
 
 import json
@@ -54,8 +55,8 @@ def test_seam_rank_for_returns_none_for_irrelevant_report(tmp_path):
 
 
 def test_seam_loads_from_default_path_via_env(tmp_path, monkeypatch):
-    # Build 3 reads $FB_ASSIST_OPEN_QUESTIONS (-> the canonical path). Publishing with
-    # no explicit path must land where rank_for() with no path reads from.
+    # The CLI package reads $FB_ASSIST_OPEN_QUESTIONS (-> the canonical path). Publishing
+    # with no explicit path must land where rank_for() with no path reads from.
     target = tmp_path / "cfg" / "open-questions.json"
     monkeypatch.setenv("FB_ASSIST_OPEN_QUESTIONS", str(target))
     s = Q.OpenQuestionSet(questions=[Q.OpenQuestion(

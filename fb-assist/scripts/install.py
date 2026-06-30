@@ -31,6 +31,20 @@ def config_dir() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude")).expanduser()
 
 
+def config_json() -> Path:
+    """The global config file Claude Code reads ``mcpServers`` from.
+
+    Claude Code's rule (verified empirically across accounts): when
+    ``$CLAUDE_CONFIG_DIR`` is set it reads ``$CLAUDE_CONFIG_DIR/.claude.json``;
+    when unset (the normal single-account case) it reads ``~/.claude.json``.
+    Honoring it here means a multi-account user (``CLAUDE_CONFIG_DIR`` set per
+    account) registers the server in the account they ran the installer from —
+    and a single-account machine is byte-identical to before (still
+    ``~/.claude.json``)."""
+    cd = os.environ.get("CLAUDE_CONFIG_DIR")
+    return (Path(cd).expanduser() / ".claude.json") if cd else (Path.home() / ".claude.json")
+
+
 def _interpreter() -> str:
     """Prefer the repo's venv (it has the NER stack); else the interpreter running us."""
     venv = REPO / ".venv" / "bin" / "python"
@@ -56,7 +70,7 @@ def _load_claude_json(path: Path) -> dict:
 
 
 def register_mcp() -> Path:
-    path = Path.home() / ".claude.json"
+    path = config_json()
     data = _load_claude_json(path)
     if path.exists():
         shutil.copy2(path, path.with_suffix(".json.fb-assist.bak"))
@@ -78,7 +92,7 @@ def uninstall() -> None:
     if skill.is_dir():
         shutil.rmtree(skill, ignore_errors=True)
         print(f"  removed skill: {skill}")
-    path = Path.home() / ".claude.json"
+    path = config_json()
     data = _load_claude_json(path)
     if data.get("mcpServers", {}).pop(SERVER_NAME, None) is not None:
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")

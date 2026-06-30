@@ -1,11 +1,11 @@
 """fb_os.metrics — visibility for the loop (the thin reporting tier).
 
-Computes the metrics the JD cares about — **time-to-triage**, **signal quality**
-(effort-weighted), cluster-size distribution, and **question turnover** — and renders
-a committed **static-HTML dashboard** (``--html``) so the public demo runs without
+Computes **time-to-triage**, effort-weighted **signal quality**, cluster-size
+distribution, and **question turnover**, and renders a committed
+**static-HTML dashboard** (``--html``) so the public demo runs without
 standing up Metabase. (Metabase is the internal/"real" path — see
-``dashboards/metabase/docker-compose.yml``; it is AGPL and intentionally NOT required
-by the core, plan §8.)
+``dashboards/metabase/docker-compose.yml``; it is AGPL and intentionally NOT
+required by the core.)
 
 ``effort_weight`` / ``cluster_priority`` are re-exported from :mod:`fb_os.triager` so
 "signal quality" is computed the *same* way the triager weights question priority.

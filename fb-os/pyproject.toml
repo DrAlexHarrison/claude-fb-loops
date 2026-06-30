@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fb-os"
 version = "0.1.0"
-description = "Feedback OS (Build 1) — the org-wide feedback loop: ingest distilled artifacts, cluster them locally (Clio-style), triage them with an internal Claude, and publish the living open-questions.json the CLI consumes. Closes the loop, free + local."
+description = "Feedback OS — the org-wide feedback loop: ingest distilled artifacts, cluster them locally (Clio-style), triage them with an internal Claude, and publish the living open-questions.json the CLI consumes. Closes the loop, free + local."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -13,7 +13,7 @@ authors = [{ name = "Alex Harrison" }]
 keywords = ["claude", "anthropic", "feedback", "clustering", "triage", "clio", "open-questions"]
 
 # CORE runtime: ZERO heavy dependencies. The runnable core + `make demo` + tests use
-# only the stdlib (sqlite3), fb_assist (the sibling Build 3 package), and — if present
+# only the stdlib (sqlite3), fb_assist (the sibling package), and — if present
 # — jsonschema for schema validation (a stdlib structural fallback is built in). The
 # embedder/clusterer ship a deterministic stdlib fallback, so nothing downloads.
 dependencies = [

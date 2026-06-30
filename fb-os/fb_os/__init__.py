@@ -1,14 +1,15 @@
-"""fb_os — Build 1, the org-wide Feedback OS (the closed loop).
+"""fb_os — the org-wide Feedback OS (the closed loop).
 
-A clonable sibling package to ``fb_assist`` (Build 3). It ingests the distilled,
-redacted feedback artifacts Build 3 produces, clusters them locally (a lightweight
-Clio reproduction), runs an internal-triager that auto-generates the living
-``open-questions.json``, and publishes that file in the **exact path + shape** the
-CLI's ``/fb`` already consumes — closing the bidirectional loop.
+A clonable sibling package to ``fb_assist``. It ingests the distilled,
+redacted feedback artifacts that package produces, clusters them locally (a
+lightweight Clio reproduction), runs an internal triager that auto-generates
+the living ``open-questions.json``, and publishes that file in the **exact
+path + shape** the CLI's ``/fb`` already consumes — closing the bidirectional
+loop.
 
-The keystone module is :mod:`fb_os.questions` (the Build1<->Build3 seam). Everything
-else (store, ingest, embed, cluster, triager, metrics) is scaffolding around that
-one closed loop.
+The keystone module is :mod:`fb_os.questions` (the seam between the two
+packages). Everything else (store, ingest, embed, cluster, triager, metrics)
+is scaffolding around that one closed loop.
 
 Reuses ``fb_assist`` (transcripts parser, redaction leak-scan floor, atomic writer,
 effort-signal schema) — never reimplements it. Local only. No network. No paid

@@ -195,7 +195,7 @@ def _cmd_demo(args) -> int:
 
     # validate the published file against the seam schema (the contract)
     Q.validate_question_set(json.loads(Path(qpath).read_text()))
-    print("\n✅ published open-questions.json is schema-valid (the Build3 seam contract).")
+    print("\n✅ published open-questions.json is schema-valid (the seam contract).")
     print(f"   canonical CLI path: {Q.default_publish_path()}")
     print(f"   demo published to : {qpath}")
     print("═" * 64)
@@ -203,7 +203,7 @@ def _cmd_demo(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="fb-os", description="Feedback OS — the org-wide loop (Build 1)")
+    p = argparse.ArgumentParser(prog="fb-os", description="Feedback OS — the org-wide feedback loop")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     pi = sub.add_parser("ingest", help="ingest an inbox of stage_review bundles (+leak floor +embed)")

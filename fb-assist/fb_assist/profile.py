@@ -1,40 +1,15 @@
-"""fb_assist.profile — the set-once privacy intelligence / policy store (Build 3, spec §10).
+"""fb_assist.profile — the set-once privacy intelligence / policy store.
 
-Why it exists (the biggest power-user win — "stop re-asking"):
-A redaction co-author that re-asks "strip this? genericize that?" every session is
-exhausting. The fix is a *persistent privacy profile* the user trains once: "always
-genericize under ``~/work/**``", "codenames Athena/Zephyr → always strip", "repos
-flagged ``.nofeedback`` → never send file contents." Pre-applied, never re-asked — so
-power users "train it once, then watch it go quiet." Plus the redactor **learns from
-corrections** (:func:`learn`): every override the user makes is remembered, scoped to the
-narrowest sensible match, and auto-applied next time — Anthropic's "Claude proposes,
-humans correct, the system learns" loop turned inward on the redactor itself.
+A persistent privacy profile the user trains once (e.g. "always genericize under
+``~/work/**``") instead of re-asking every session, and that learns from corrections
+(:func:`learn`) into narrowly-scoped rules applied silently next time. Three layers —
+global profile, per-repo ``.feedbackpolicy``, and session overrides — resolve
+most-specific-wins (:func:`resolve`), except a ``hard`` rule is a privacy floor a
+less-strict, more-specific rule cannot loosen without an explicit ``unlock``. The
+entity ``allow`` list rescues a brand a detector wrongly eats (e.g. "Tuesday"
+mistagged as a DATE_TIME); ``deny`` force-strips codenames detectors miss.
 
-Three layers, **most-specific-wins**, with **hard floors** (spec §10):
-
-* **Global profile** — ``~/.config/fb-assist/profile.json`` (per-machine user data). Holds
-  hand-authored ``rules`` + a ``learned`` block grown by :func:`learn`.
-* **Per-repo policy** — ``<repo_root>/.feedbackpolicy`` (committed, team-shareable, like a
-  ``.gitignore`` for feedback). JSON, or YAML when PyYAML is importable.
-* **Session overrides** — passed in at :func:`resolve` time (highest specificity).
-
-Precedence (the load-bearing logic — :func:`resolve`):
-  1. A rule applies when its ``match`` (``path_glob`` / ``repo`` / ``session_id``; multiple
-     keys = AND; empty match = always) fits the call site.
-  2. Specificity tiers **session > repo > global**; within a tier a more-specific glob
-     (more path segments, fewer wildcards) wins.
-  3. Most-specific wins **per decision key** (a category, an entity, or the bare action) —
-     **except** a rule marked ``hard`` is a privacy *floor*: a less-strict higher-specificity
-     rule cannot *loosen* it without an explicit ``unlock``. Entity allow/deny lists merge
-     across layers (union); ``hard`` denies are un-removable; the ``allow`` list is the
-     brand/codename **rescue** list (e.g. "Saturday" — a real brand Presidio wrongly eats as
-     a DATE_TIME — must be un-redacted), and the ``deny`` list is codenames detectors miss
-     that must always be stripped.
-
-Pure-stdlib core. JSON is canonical; ``.feedbackpolicy`` may be YAML *iff* PyYAML is present
-(graceful JSON fallback — never hard-fail on the optional dep). No network. Every entry point
-takes explicit paths/dicts so callers (and tests) stay hermetic — the real
-``~/.config/fb-assist/`` is touched only when a path is not supplied.
+Pure-stdlib; YAML for ``.feedbackpolicy`` only if PyYAML is present. No network.
 """
 
 from __future__ import annotations
@@ -66,7 +41,7 @@ except Exception:  # pragma: no cover - environment dependent
 PROFILE_VERSION = 1
 POLICY_FILENAME = ".feedbackpolicy"
 
-# User data, per-machine (syncs across Alex's boxes out of band). A *stable* known location,
+# User data, per-machine (syncs across the user's machines out of band). A *stable* known location,
 # deliberately overridable by env for the multi-machine setup and by param for tests.
 DEFAULT_PROFILE_PATH = Path(
     os.environ.get("FB_ASSIST_PROFILE", str(Path.home() / ".config" / "fb-assist" / "profile.json"))
@@ -538,14 +513,14 @@ def learn(
     override::
 
         {
-          "entity": "Saturday",            # the value the user re-judged (optional)
+          "entity": "Tuesday",             # the value the user re-judged (optional)
           "action": "allow",               # allow => rescue (entities.allow); else strip/...
           "category": "file_contents",     # optional; scopes the action to one category
-          "repo": "saturday",              # narrowing: prefer repo, then path_glob, then session
+          "repo": "tuesday",               # narrowing: prefer repo, then path_glob, then session
           "cwd" / "path_glob": "...",      # alt narrowing by location
           "session_id": "...",             # provenance + last-resort narrowing
           "hard": false,                   # promote the correction to a hard floor
-          "trigger": "user un-redacted brand 'Saturday'",  # provenance
+          "trigger": "user un-redacted brand 'Tuesday'",  # provenance
         }
 
     ``ts`` defaults to ``None`` -> :func:`time.time` (tests pin it for determinism). With
@@ -612,7 +587,7 @@ def apply_entity_rules(
     ``redaction_map`` is a sequence of ``{"category","original","replacement", ...}`` entries
     (the shape ``transcripts.py`` / ``package.diff_preview`` use). Any entry whose ``original``
     is on the resolved ``entities.allow`` rescue list is removed, i.e. the wrongly-eaten brand
-    (e.g. "Saturday", which Presidio mis-tags as a DATE_TIME) is *un-redacted* and survives into
+    (e.g. "Tuesday", which Presidio mis-tags as a DATE_TIME) is *un-redacted* and survives into
     the outbound bundle. The ``deny`` list is enforced upstream (detectors strip those); this
     helper is only the rescue side, kept small and total so it is trivially testable.
     """

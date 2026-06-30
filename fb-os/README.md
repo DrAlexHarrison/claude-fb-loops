@@ -1,6 +1,6 @@
-# fb-os — Feedback OS (Build 1)
+# fb-os — Feedback OS
 
-The **org-wide side** of the feedback loop. Build 3 (`fb-assist`) is the edge: it
+The **org-wide side** of the feedback loop. `fb-assist` is the edge: it
 co-authors redacted feedback and ships it through Claude Code's real `/feedback`.
 `fb-os` is the org: it **ingests** those distilled artifacts, **clusters** them
 locally (a lightweight Clio reproduction), runs an internal **triager** that
@@ -24,13 +24,13 @@ make test        # free, deterministic (mock triager, no live Claude call)
 `make demo` prints each stage and publishes a schema-valid `open-questions.json` to a
 workdir-local path (it never clobbers the real `~/.config/fb-assist/open-questions.json`).
 
-## The seam (what Build 3 consumes)
+## The seam (what the `/fb` co-author consumes)
 
 - **File:** `~/.config/fb-assist/open-questions.json` (override `$FB_ASSIST_OPEN_QUESTIONS`).
 - **Schema:** [`fb_os/schema/open-questions.schema.json`](fb_os/schema/open-questions.schema.json).
-- **Selector:** `fb_os.questions.rank_for(report_context)` — imported by **both** ends
-  so the producer and consumer can't drift. Returns the single most-relevant **open**,
-  unexpired, surface-applicable question, or `None`. *One. Never a survey.*
+- **Selector:** `fb_os.questions.rank_for(report_context)` — the same selection rule both
+  ends use so the producer and consumer can't drift. Returns the single most-relevant
+  **open**, unexpired, surface-applicable question, or `None`. *One. Never a survey.*
 
 ## The keystone
 

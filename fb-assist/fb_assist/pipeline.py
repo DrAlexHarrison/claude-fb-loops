@@ -1,23 +1,12 @@
-"""The validated fb-assist call-sequence, lifted into reusable functions.
+"""The validated fb-assist call sequence, lifted into reusable functions.
 
-This is the co-author's playbook (``INTEGRATION.md``) made into an importable API:
-the exact, proven order ``parse -> detect -> redact -> assemble -> preview -> gate``
-that ``tests/test_integration.py`` validates end-to-end (89/89 green). The MCP
-server (``mcp_server.py``) is a thin, per-session-stateful wrapper over THIS module
-— no business logic lives in the server, so the in-session runtime and the test
-share one source of truth and cannot drift.
+Order: parse -> detect -> redact -> assemble -> preview -> gate — what the
+integration tests validate end-to-end. The MCP server is a thin wrapper over
+this module so the runtime and tests share one source of truth.
 
-Why a separate module (vs. leaving it in the test): the runtime needs the same
-sequence the test proves, callable a step at a time across MCP tool calls. So the
-``_mask_narrative`` bridge and the seven-step flow are lifted here verbatim in
-behavior; the integration test's invariants are re-asserted through this API by
-``tests/test_pipeline.py``.
-
-THE TWO TYPE SEAMS (gotcha #1 — the #1 footgun):
-  * ``transcripts.*`` (parse, redaction_map, the extractors, replace_span) take
-    **Record objects**.
-  * ``redact.strip_categories`` and ``package.*`` take **raw dicts** (``record.raw``).
-  Parse once, keep both views. Every function here is explicit about which it wants.
+Two type seams to keep straight: ``transcripts.*`` takes Record objects;
+``redact.strip_categories`` and ``package.*`` take raw dicts. Parse once,
+keep both views.
 
 Local only. No network. No paid software.
 """
@@ -25,6 +14,7 @@ Local only. No network. No paid software.
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Union
 
@@ -34,8 +24,8 @@ from . import package as P
 
 PathLike = Union[str, Path]
 
-# The proven recipe (INTEGRATION.md gotcha #3): strip these bulk categories
-# WHOLESALE (buried secrets the user never wants shipped) ...
+# Strip these bulk categories wholesale — buried secrets the user never wants
+# shipped ...
 DEFAULT_STRIP_CATEGORIES = [
     "file_contents", "bash_output", "tool_calls", "websearch",
     "thinking_blocks", "hook_output", "injected_memory",
@@ -51,7 +41,7 @@ KEEP_BUT_MASK = ["human_prompts", "assistant_text"]
 # --------------------------------------------------------------------------- #
 @dataclasses.dataclass
 class Parsed:
-    """The two views of one transcript, parsed once (gotcha #1)."""
+    """The two views of one transcript, parsed once."""
     path: str
     records: list[T.Record]
     raws: list[dict]
@@ -74,12 +64,12 @@ def parse_session(path: PathLike) -> Parsed:
 # 2) DETECT — WHERE (locators) + WHAT (findings).                              #
 # --------------------------------------------------------------------------- #
 def analyze(parsed: Parsed, *, reveal: bool = False) -> dict:
-    """The unified detect pass: WHERE each category lives + WHAT is sensitive.
+    """The unified detect pass: where each category lives + what is sensitive.
 
     ``transcripts.redaction_map`` (Record objects) locates every category; the
-    detectors run over the located NARRATIVE spans (the kept human/assistant text)
-    to surface the secrets/PII a bulk strip would miss. Values are MASKED by
-    default — never echo a raw secret back into the model's context (gotcha #2).
+    detectors run over the located narrative spans (the kept human/assistant text)
+    to surface the secrets/PII a bulk strip would miss. Values are masked by
+    default — never echo a raw secret back into the model's context.
     """
     location_map = T.redaction_map(parsed.records)  # WHERE (pass Record objects)
     narrative_findings: list[dict] = []
@@ -108,8 +98,8 @@ def analyze(parsed: Parsed, *, reveal: bool = False) -> dict:
 # --------------------------------------------------------------------------- #
 def _deny_findings(text: str, deny: Iterable[str]) -> list[R.Finding]:
     """Make char-precise Findings for every occurrence of each ``deny`` literal —
-    codenames the pattern detectors miss but the user's profile says always strip
-    (gotcha #5, the deny side). Case-sensitive, longest-first to avoid overlaps."""
+    codenames the pattern detectors miss but the user's profile says always strip.
+    Case-sensitive, longest-first to avoid overlaps."""
     out: list[R.Finding] = []
     for term in sorted({t for t in deny if t}, key=len, reverse=True):
         start = 0
@@ -130,20 +120,19 @@ def mask_narrative(
     allow: Optional[Iterable[str]] = None,
     deny: Optional[Iterable[str]] = None,
 ) -> list[dict]:
-    """In-place char-precise mask of secrets/PII inside the KEPT narrative fields.
+    """In-place char-precise mask of secrets/PII inside the kept narrative fields.
 
-    The locator<->finding BRIDGE (the one real seam between the modules), lifted
-    verbatim from the integration test: for each located narrative Span, run the
-    detectors on its text, mask in place via the Span's path
+    The locator<->finding bridge between the modules: for each located narrative
+    Span, run the detectors on its text, mask in place via the Span's path
     (``transcripts.replace_span``), and emit one ``diff_preview``-shaped
     redaction_map entry per chosen Finding. Mutates ``raws`` in place; also returns
     the redaction_map.
 
-    Profile hooks (gotcha #5 — the persistent profile is load-bearing):
-      * ``allow`` — brand/codename literals to RESCUE: any Finding whose text is on
-        this list is NOT masked (e.g. "Saturday", which Presidio mis-eats as a
+    Profile hooks (the persistent profile is load-bearing):
+      * ``allow`` — brand/codename literals to rescue: any Finding whose text is on
+        this list is not masked (e.g. "Tuesday", which Presidio mis-eats as a
         DATE_TIME). The user trained this once; it survives into the bundle.
-      * ``deny`` — extra literals to ALWAYS strip even though no detector flags them
+      * ``deny`` — extra literals to always strip even though no detector flags them
         (internal codenames). Masked the same as a detected Finding.
     """
     allow_set = {t for t in (allow or []) if t}
@@ -156,17 +145,27 @@ def mask_narrative(
             findings = R.scan_secrets(sp.text) + R.scan_pii(sp.text)
             if deny_list:
                 findings = findings + _deny_findings(sp.text, deny_list)
-            # Profile rescue: drop findings the user allow-listed (gotcha #5).
+            # Profile rescue: drop findings the user allow-listed.
             if allow_set:
                 findings = [f for f in findings if f.text not in allow_set]
-            chosen = R.merge_redaction_spans(findings)
+            # apply_redactions(value_consistent=True, the default) masks EVERY literal
+            # occurrence of a detected value, not just the one span a detector returned.
+            # Expand to those occurrences HERE and build the redaction_map from the spans
+            # ACTUALLY masked — otherwise a value that repeats inside one narrative span
+            # is masked more times than the map records, and the preview/gate undercount.
+            expanded = R._expand_value_occurrences(sp.text, findings)
+            chosen = R.merge_redaction_spans(expanded)
             if not chosen:
                 continue
-            masked, _ = R.apply_redactions(sp.text, findings, style="mask")
+            # value_consistent=False: `expanded` is already occurrence-complete, so the
+            # masked bytes are spliced from EXACTLY `chosen` (same spans, same winning
+            # entity per span) — the map and the mutation stay in lockstep.
+            masked, _ = R.apply_redactions(sp.text, expanded, style="mask",
+                                           value_consistent=False)
             if masked == sp.text:
                 continue
             T.replace_span(raw, sp, masked)            # locator -> in-place mutation
-            for f in chosen:                            # Finding -> diff_preview entry
+            for f in chosen:                            # one entry per span actually masked
                 redaction_map.append({
                     "uuid": sp.uuid,
                     "category": f.entity,               # ANTHROPIC_KEY / PERSON / EMAIL_ADDRESS / CODENAME / ...
@@ -187,7 +186,7 @@ def redact_recipe(
 ) -> dict:
     """Execute the validated redaction chain on raw dicts.
 
-    ``strip`` defaults to the proven 9-category bulk set; ``mask`` (default True)
+    ``strip`` defaults to the 9-category bulk strip set; ``mask`` (default True)
     additionally char-precise-masks the kept narrative via the bridge, honoring the
     profile ``allow`` (rescue) / ``deny`` (codename strip) lists. Returns
     ``{sanitized_raws, redaction_map}``. Does NOT mutate the input ``raws``
@@ -219,11 +218,21 @@ def assemble_and_preview(
     """
     payload = P.assemble_payload(description, dict(targets), limit=limit,
                                  effort_signal=effort_signal)
-    # diff_preview is per-file; preview the first target (the common single-session
-    # case). Multi-target previews are summed by the caller if needed.
-    first = next(iter(targets))
-    orig = list(originals[first]) if originals and first in originals else list(targets[first])
-    preview = P.diff_preview(orig, list(targets[first]), redaction_map=redaction_map or [])
+    # diff_preview is per-file; aggregate it across EVERY session that actually ships
+    # (the post-budget payload.targets) so a multi-session bundle's gate summary reflects
+    # the WHOLE bundle — kept/modified records and bytes summed across all sessions, not
+    # just the first (which silently undercounts redactions/bytes in every other session).
+    orig_records: list[dict] = []
+    red_records: list[dict] = []
+    for path, recs in targets.items():
+        if os.fspath(path) not in payload.targets:
+            continue  # dropped for budget; surfaced via over_budget below
+        red_records.extend(recs)
+        if originals and path in originals:
+            orig_records.extend(originals[path])
+        else:
+            orig_records.extend(recs)
+    preview = P.diff_preview(orig_records, red_records, redaction_map=redaction_map or [])
     return {
         "payload": payload,
         "preview": preview,
@@ -233,7 +242,7 @@ def assemble_and_preview(
 
 
 # --------------------------------------------------------------------------- #
-# 6-7) EGRESS GATE — the two-layer gate (gotcha #2).                            #
+# 6-7) EGRESS GATE — the two-layer gate.                                        #
 # --------------------------------------------------------------------------- #
 def upload_text(payload: "P.Payload") -> str:
     """The ACTUAL bytes that leave: description (+effort footer) + sanitized JSONL."""
@@ -244,9 +253,9 @@ def upload_text(payload: "P.Payload") -> str:
 
 
 def content_surface(sanitized_raws: list[dict], description: str = "") -> str:
-    """The human-meaningful narrative rendered from the SANITIZED records — the
-    right input for the NER recall gate (NOT raw JSONL, which makes NER hallucinate
-    PII from structural tokens; gotcha #2)."""
+    """The human-meaningful narrative rendered from the sanitized records — the
+    right input for the NER recall gate (not raw JSONL, which makes NER hallucinate
+    PII from structural tokens)."""
     recs = [T.Record(line=i + 1, raw=r, type=str(r.get("type", "")))
             for i, r in enumerate(sanitized_raws)]
     narrative = list(T.human_prompts(recs)) + list(T.assistant_text(recs))
@@ -255,12 +264,12 @@ def content_surface(sanitized_raws: list[dict], description: str = "") -> str:
 
 
 def egress_gate(upload: str, content: str, *, reveal: bool = False) -> dict:
-    """The two-layer egress gate (spec §9, gotcha #2).
+    """The two-layer egress gate.
 
-    Layer (a) — the HARD, machine-decidable FLOOR: ``scan_secrets`` + the PII regex
-    floor over the ACTUAL upload bytes. Zero false positives; MUST be empty to ship.
-    Layer (b) — semantic NER ``leak_scan`` over the rendered CONTENT surface: a
-    recall layer yielding CANDIDATES for the co-author to self-repair, never a
+    Layer (a) — the hard, machine-decidable floor: ``scan_secrets`` + the PII regex
+    floor over the actual upload bytes. Zero false positives; must be empty to ship.
+    Layer (b) — semantic NER ``leak_scan`` over the rendered content surface: a
+    recall layer yielding candidates for the co-author to self-repair, never a
     boolean veto.
     """
     floor_secrets = R.scan_secrets(upload)

@@ -1,14 +1,13 @@
 # claude-fb-loops — monorepo root (NOT itself a package).
 #
-# Three independently-installable packages live here:
+# Two independently-installable packages live here:
 #   fb-assist/      the keystone — privacy-preserving feedback co-author + claude-repro
 #   fb-os/          Feedback OS — the org-wide ingest/cluster/triage loop
-#   pps-pipeline/   work-observation interview packager + assessment
 #
-# fb-os and pps-pipeline depend on fb-assist, so install fb-assist FIRST:
+# fb-os depends on fb-assist, so install fb-assist FIRST:
 #
 #   python -m pip install -e ./fb-assist
-#   python -m pip install -e ./fb-os -e ./pps-pipeline
+#   python -m pip install -e ./fb-os
 #   python -m spacy download en_core_web_sm        # NER backbone (≈12 MB)
 #
 # Or just run the download-free demo with no install at all:
@@ -18,7 +17,7 @@
 # uv users can drive the whole tree as a workspace:
 
 [tool.uv.workspace]
-members = ["fb-assist", "fb-os", "pps-pipeline"]
+members = ["fb-assist", "fb-os"]
 
 [tool.uv.sources]
 fb-assist = { workspace = true }

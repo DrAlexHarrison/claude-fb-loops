@@ -1,4 +1,4 @@
-# fb-os — Feedback OS (Build 1). Free + local: no network, no paid software.
+# fb-os — Feedback OS. Free + local: no network, no paid software.
 .PHONY: demo test clean help install
 
 PY ?= python3

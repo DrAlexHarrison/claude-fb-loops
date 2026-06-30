@@ -1,4 +1,4 @@
-"""Tests for fb_assist.reputation — the pseudonymous careful-filterer trust token (spec §13).
+"""Tests for fb_assist.reputation — the pseudonymous careful-filterer trust token.
 
 The token is the privacy-bearing artifact Anthropic would weight server-side, so the
 contract gets direct, adversarial coverage:
@@ -472,14 +472,14 @@ def test_reputation_block_coexists_with_profile_rules(tmp_path):
     p = ppath(tmp_path)
     # seed a real privacy profile (rules + a learned correction)
     PF.save_profile({"version": 1, "rules": [{"action": "strip", "match": {}}], "learned": []}, p)
-    PF.learn({"entity": "Saturday", "action": "allow", "repo": "saturday"}, profile_path=p)
+    PF.learn({"entity": "Tuesday", "action": "allow", "repo": "tuesday"}, profile_path=p)
     # now add the reputation identity to the SAME profile file
     R.issue_identity(profile_path=p)
     R.record_acceptance(quality=5, profile_path=p)
     # privacy blocks survive intact...
     prof = PF.load_profile(p)
     assert prof["rules"] == [{"action": "strip", "match": {}}]
-    assert len(prof["learned"]) == 1 and prof["learned"][0]["entities"]["allow"] == ["Saturday"]
+    assert len(prof["learned"]) == 1 and prof["learned"][0]["entities"]["allow"] == ["Tuesday"]
     # ...and the resolve engine still works over the same file
     resolved = PF.resolve(str(tmp_path), profile=p)
     assert resolved["decisions"]["action"]["action"] == "strip"
@@ -497,6 +497,15 @@ def test_profile_learn_preserves_reputation_block(tmp_path):
     rep = R.load_identity(p)
     assert rep is not None and rep["pseudonymous_id"] == pid
     assert R.reputation_score(profile_path=p) > 0
+
+
+def test_quality_weight_tolerates_non_numeric():
+    # A non-numeric quality (e.g. a dict/list) must fall back to the neutral default,
+    # never raise (regression: `weight` was left unbound), and stay in the valid band.
+    assert 0.05 <= R._quality_weight({"oops": "not a number"}, None) <= 1.0
+    assert 0.05 <= R._quality_weight([1, 2, 3], None) <= 1.0
+    assert R._quality_weight(5, None) == 1.0      # numeric path unaffected
+    assert R._quality_weight(None, None) == 0.7   # unrated -> neutral default
 
 
 if __name__ == "__main__":  # pragma: no cover

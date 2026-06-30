@@ -1,23 +1,13 @@
 """fb-assist MCP server — the in-session co-author's model-invocable toolbox.
 
-An always-on stdio MCP server (FastMCP) that exposes the proven fb-assist toolbox
-as ``mcp__fb-assist__*`` tools. The ``/fb`` skill morphs the live Claude into the
-feedback co-author; this server is the hands it works with.
+An always-on stdio MCP server (FastMCP) exposing the fb-assist toolbox as
+``mcp__fb-assist__*`` tools for the ``/fb`` skill. Every tool is a THIN wrapper
+over the library — no business logic here — and returns COMPACT JSON (locators,
+counts, MASKED samples), never a full transcript or a raw secret.
 
-DESIGN RULE: every tool is a THIN wrapper over the library (``pipeline`` /
-``package`` / ``locate`` / ``profile`` / ``genericize``). No business logic lives
-here — the validated call-sequence is in ``pipeline.py`` (re-asserted by
-``test_pipeline.py``), so the runtime and the proof cannot drift. Tools return
-COMPACT JSON (locators, counts, MASKED samples) and never dump a full transcript
-or a raw secret into the model's context (gotcha #2).
-
-State: per-session, keyed by ``session_id``, held in an in-memory dict (the parsed
-records, the redaction map, the sanitized records, the staged journal path). State
-is ephemeral; the on-disk journal is the durable truth for restore. The co-author
-passes ``session_id`` fresh each turn (the skill reads ``$CLAUDE_CODE_SESSION_ID``
-per-turn — avoids MCP-process env staleness across /clear, OPEN-2).
-
-Local only. No network. No paid software.
+State is per-session, in-memory, and ephemeral (the on-disk swap journal is the
+durable truth); callers should pass ``session_id`` fresh each turn since the MCP
+process's own env can go stale across ``/clear``. Local only, no network.
 """
 
 from __future__ import annotations
@@ -49,9 +39,9 @@ class _LazyModule:
     ``pipeline`` and ``genericize`` pull in the NER stack (presidio/gliner/torch);
     importing them eagerly made the MCP server slow to start, so Claude Code's
     connection timeout silently dropped it on a cold start and the co-author fell
-    back to the CLI (dogfooding find, 2026-06-30). Loading them lazily lets the
-    server connect in well under a second; the heavy load happens on first *use*
-    (a detect/redact call), when the user is actively working, not at connect time.
+    back to the CLI. Loading them lazily lets the server connect in well under a
+    second; the heavy load happens on first *use* (a detect/redact call), when the
+    user is actively working, not at connect time.
     """
 
     def __init__(self, name: str) -> None:
@@ -132,13 +122,32 @@ def _by_category(redaction_map: list) -> dict:
 # --------------------------------------------------------------------------- #
 def locate_session(cwd: Optional[str] = None, session_id: Optional[str] = None) -> dict:
     """Resolve which on-disk transcript is THIS session (and the past sessions
-    around it). Identity-first ``is_live`` (FIX-3). Returns
-    ``{session_id, path, project_dir, config_dir, account, is_live, candidates, ...}``."""
+    around it). Identity-first ``is_live``. Returns
+    ``{session_id, path, project_dir, config_dir, account, is_live, candidates, ...}``.
+
+    Server-vs-user cwd: this server is long-lived and its process cwd is its spawn
+    dir, NOT the user's session cwd. If the caller gives neither a cwd nor a
+    resolvable session id, ``locate.resolve`` falls back to the *process* cwd
+    (``cwd_source=="process"``) — which would silently offer the WRONG project's
+    sessions as the swap menu. We refuse that LOUDLY instead of guessing. The skill
+    must pass the fresh ``$CLAUDE_CODE_SESSION_ID`` (preferred) or the user's cwd."""
     info = L.resolve(cwd=cwd, session_id=session_id)
+    if info.get("cwd_source") == "process":
+        return {
+            "error": "can't determine your project — no cwd, no session_id, and "
+                     "$CLAUDE_CODE_SESSION_ID is unset. This MCP server's own working "
+                     "directory is NOT your session's, so any candidate I picked would "
+                     "target the WRONG project. Pass session_id=<fresh "
+                     "$CLAUDE_CODE_SESSION_ID> (preferred) or cwd=<your project dir>.",
+            "cwd_source": "process",
+            "session_id": info.get("session_id"),
+            "candidates": [],
+            "candidate_count": 0,
+        }
     if info.get("session_id"):
         _session(info["session_id"], cwd=info.get("cwd")).path = info.get("path")
     # Cap candidates so a project dir with hundreds of sessions can't blow the
-    # MCP token budget (same dogfooding class as list_sessions).
+    # MCP token budget.
     cands = info.get("candidates") or []
     info["candidate_count"] = len(cands)
     info["candidates"] = cands[:25]
@@ -151,9 +160,9 @@ def list_sessions(cwd: Optional[str] = None, window_hours: Optional[float] = Non
 
     Returns ``{total, returned, truncated, sessions:[{path,size,mtime,session_id,project_dir}]}``.
     The cap is load-bearing: with ``cwd=None`` ``find_transcripts`` scans every
-    project dir across all accounts, which on a heavy machine is enormous — the
-    uncapped version returned 770k characters and blew the MCP token budget
-    (dogfooding find, 2026-06-30). The safe swap target is a PAST/closed session (§15)."""
+    project dir across all accounts, which on a heavy machine is enormous — an
+    uncapped result can blow the MCP token budget. The safe swap target is a
+    PAST/closed session."""
     found = T.find_transcripts(cwd=cwd, window_hours=window_hours)
     return {
         "total": len(found),
@@ -171,8 +180,7 @@ def extract(session_id: str, category: str, cwd: Optional[str] = None,
     """Locate one category's spans (``transcripts.extract``). Returns LOCATORS +
     previews by default (``reveal=True`` for full text — use sparingly). Capped on BOTH
     span COUNT (``limit``) and revealed BYTES per span (``reveal_char_cap``): a handful
-    of ``file_contents`` spans can be megabytes, which would blow the MCP token budget
-    (the 770 KB ``list_sessions`` class, S1)."""
+    of ``file_contents`` spans can be megabytes, which would blow the MCP token budget."""
     s = _session(session_id, cwd)
     spans = list(T.extract(_need_path(s), category))
     out = []
@@ -194,7 +202,7 @@ def extract(session_id: str, category: str, cwd: Optional[str] = None,
 def relevant_slice(session_id: str, needle: str, context_turns: int = 1,
                    cwd: Optional[str] = None, limit: int = 40) -> dict:
     """The exchange around an error/keyword/uuid (``transcripts.relevant_slice``).
-    Returns compact record summaries — uuid, type, and a short preview. S1: rejects an
+    Returns compact record summaries — uuid, type, and a short preview. Rejects an
     empty needle (which matches the WHOLE transcript) and caps returned records."""
     if not (needle or "").strip():
         return {"error": "needle must be non-empty — an empty needle matches every "
@@ -221,9 +229,9 @@ def size_estimate(session_id: str, by_category: bool = False, cwd: Optional[str]
 # --------------------------------------------------------------------------- #
 def detect(session_id: str, cwd: Optional[str] = None, limit: int = 200) -> dict:
     """The unified WHERE+WHAT pass (``pipeline.analyze``): where each category lives
-    + what's sensitive in the kept narrative. Values MASKED by default (gotcha #2).
-    S1: caps the (masked) narrative_findings list so a finding-dense session can't blow
-    the MCP token budget — the count + flag stay accurate."""
+    + what's sensitive in the kept narrative. Values MASKED by default. Caps the
+    (masked) narrative_findings list so a finding-dense session can't blow the MCP
+    token budget — the count + flag stay accurate."""
     s = _session(session_id, cwd)
     result = PL.analyze(_ensure_parsed(s))
     nf = result.get("narrative_findings") or []
@@ -285,7 +293,7 @@ def distill_range(session_id: str, start_idx: int, end_idx: int, summary: str,
                   cwd: Optional[str] = None) -> dict:
     """Collapse a verbose record range into one faithful summary record
     (``genericize.distill_turn_range``), operating on the staged sanitized records.
-    The distilled version is ALWAYS surfaced to the user for confirmation (sacred)."""
+    The distilled version is ALWAYS surfaced to the user for confirmation."""
     s = _session(session_id, cwd)
     if s.sanitized_raws is None:
         _ensure_parsed(s)
@@ -298,12 +306,15 @@ def distill_range(session_id: str, start_idx: int, end_idx: int, summary: str,
 # Assemble / Preview / Gate                                                    #
 # --------------------------------------------------------------------------- #
 def _prepare_extra(identifier: str, cwd: Optional[str]) -> Optional[dict]:
-    """Resolve+parse+redact ONE extra session for a multi-session bundle (#4 / spec §5).
+    """Resolve+parse+redact ONE extra session for a multi-session bundle.
 
     ``identifier`` is either a path to a ``.jsonl`` transcript or a ``session_id``
     (resolved against ``cwd``). Runs the SAME proven redaction recipe as the primary
     (profile-aware) so every bundled session ships sanitized. Returns
-    ``{path, sanitized, originals}`` or ``None`` if it can't be resolved to a file."""
+    ``{path, sanitized, originals, redaction_map}`` or ``None`` if it can't be resolved
+    to a file. The ``redaction_map`` is load-bearing: ``assemble`` concatenates every
+    bundled session's map so the gate preview's by-category counts + samples cover the
+    WHOLE bundle, not just the primary."""
     if os.path.isfile(identifier):
         path: Optional[str] = identifier
     else:
@@ -318,7 +329,8 @@ def _prepare_extra(identifier: str, cwd: Optional[str]) -> Optional[dict]:
     allow = ents.get("allow") or None
     deny = ents.get("deny") or None
     red = PL.redact_recipe(parsed.raws, allow=allow, deny=deny)
-    return {"path": path, "sanitized": red["sanitized_raws"], "originals": parsed.raws}
+    return {"path": path, "sanitized": red["sanitized_raws"], "originals": parsed.raws,
+            "redaction_map": red["redaction_map"]}
 
 
 def assemble(session_id: str, description: str, effort_signal: Optional[dict] = None,
@@ -326,9 +338,9 @@ def assemble(session_id: str, description: str, effort_signal: Optional[dict] = 
     """Build the on-disk payload under the 1 MB budget + the concise gate preview
     (``pipeline.assemble_and_preview``). Stores the Payload in session state.
 
-    Bundles the PRIMARY session (the common case, spec §5) and, when given,
+    Bundles the PRIMARY session (the common case) and, when given,
     ``extra_sessions`` — a list of session_ids or transcript paths to bundle ALONGSIDE
-    it (spec §5 "the related runs"). Every extra is parsed + redacted with the same
+    it (the related runs). Every extra is parsed + redacted with the same
     proven recipe; ``budget_pack`` then fits the set under the 1 MB cap newest-first,
     so the primary (most recent) is never starved by older extras — anything that
     doesn't fit is reported in ``over_budget`` and aged OUT-of-window by submit_begin.
@@ -338,13 +350,25 @@ def assemble(session_id: str, description: str, effort_signal: Optional[dict] = 
     parsed = _ensure_parsed(s)
     if s.sanitized_raws is None:
         # No explicit redact step — default to the proven recipe so we never ship raw.
-        red = PL.redact_recipe(parsed.raws)
+        # Resolve and apply the profile here too (mirroring redact_recipe's handling):
+        # without it a profile-DENIED codename could ship, and a profile-ALLOWED brand
+        # would get needlessly masked, when the co-author calls assemble() directly.
+        allow = deny = None
+        resolved = PROF.resolve(s.cwd, session_id=session_id, repo_root=s.cwd)
+        ents = resolved.get("entities", {}) or {}
+        allow = ents.get("allow") or None
+        deny = ents.get("deny") or None
+        red = PL.redact_recipe(parsed.raws, allow=allow, deny=deny)
         s.sanitized_raws, s.redaction_map = red["sanitized_raws"], red["redaction_map"]
     s.description = description
     s.effort_signal = effort_signal
 
     targets: dict[str, list] = {s.path: s.sanitized_raws}
     originals: dict[str, list] = {s.path: parsed.raws}
+    # Aggregate every bundled session's redaction_map (primary + each included extra) so
+    # the gate preview's stripped_by_category + samples reflect the WHOLE bundle, not just
+    # the primary (the bytes/record counts already aggregate in assemble_and_preview).
+    redaction_map: list = list(s.redaction_map or [])
     extras_report: list[dict] = []
     for ident in (extra_sessions or []):
         prepared = _prepare_extra(ident, cwd or s.cwd)
@@ -357,11 +381,12 @@ def assemble(session_id: str, description: str, effort_signal: Optional[dict] = 
             continue
         targets[prepared["path"]] = prepared["sanitized"]
         originals[prepared["path"]] = prepared["originals"]
+        redaction_map.extend(prepared.get("redaction_map") or [])
         extras_report.append({"identifier": ident, "path": prepared["path"], "included": True})
 
     ap = PL.assemble_and_preview(
         description, targets,
-        originals=originals, redaction_map=s.redaction_map or [],
+        originals=originals, redaction_map=redaction_map,
         effort_signal=effort_signal,
     )
     s.payload, s.preview = ap["payload"], ap["preview"]
@@ -396,7 +421,7 @@ def preview(session_id: str, cwd: Optional[str] = None) -> dict:
 def leak_scan(session_id: str, cwd: Optional[str] = None, candidate_limit: int = 100) -> dict:
     """The two-layer egress gate (``pipeline.egress_gate``). Returns the HARD,
     machine-decidable FLOOR (must be empty to ship) + NER CANDIDATES for self-repair
-    (never a boolean veto). Call ``assemble`` first. S1: caps the candidate list (the
+    (never a boolean veto). Call ``assemble`` first. Caps the candidate list (the
     count stays exact) so a noisy NER pass can't blow the MCP token budget."""
     s = _session(session_id, cwd)
     if s.payload is None:
@@ -419,28 +444,43 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
 
     ``live_session_id`` — the CURRENTLY-LIVE session id (the skill passes a fresh
     ``$CLAUDE_CODE_SESSION_ID`` here). It identifies which on-disk file the native
-    gather would co-upload raw, and which file begin_swap must refuse to swap (FIX-3).
+    gather would co-upload raw, and which file begin_swap must refuse to swap.
     Falls back to ``session_id`` (correct when the feedback IS about the live session);
-    never the MCP server's frozen spawn-time env (M3).
+    never the MCP server's frozen spawn-time env.
 
-    (1) FIX 1 — the gather-gate: read the LIVE session's on-disk bytes *as of now*
-        and run the DETERMINISTIC egress scan over them (secrets + PII-regex + paths +
+    (1) The gather-gate: read the LIVE session's on-disk bytes *as of now* and run
+        the DETERMINISTIC egress scan over them (secrets + PII-regex + paths +
         env-metadata + IP-markers — the floor PLUS the structural-leak detectors, but
         no NER, which hallucinates over raw JSONL). So the co-author sees what the live
         session would co-upload *raw*. If it's not clean and ``allow_live_gate`` is
         False, REFUSE and recommend checkpoint (the airtight path). This catches the
         file-contents / paths / cwd-gitBranch leaks the secret-only floor missed.
-    (2) S3 — fail-closed: re-assert the deterministic floor over the staged payload
-        bytes here (the mechanism, not just the model's leak_scan call, holds the line).
-    (3) ``begin_swap`` the targets (FIX 3 live-id refusal + FIX 2 journaled
-        windowing: age every OTHER past file out of the +7d window so the native
-        gather matches what we staged).
+    (2) Fail-closed: re-assert the deterministic floor over the staged payload bytes
+        here (the mechanism, not just the model's leak_scan call, holds the line).
+    (3) ``begin_swap`` the targets (live-id refusal + journaled windowing: age every
+        OTHER past file out of the +7d window so the native gather matches what we
+        staged).
     Returns the journal path + the exact ``/feedback`` instruction."""
     s = _session(session_id, cwd)
     if s.payload is None:
         return {"staged": False, "error": "nothing assembled yet — call assemble() first"}
 
-    # S3 — the mechanism holds the floor: never stage a payload whose own bytes fail the
+    # Nothing fit the 1 MB /feedback gather budget → assemble dropped every session and
+    # payload.targets is empty. begin_swap() raises ValueError on an empty mapping, so
+    # refuse GRACEFULLY here with an actionable next step instead of throwing out of the
+    # tool. (A legitimate case: one big session, or all sessions over-budget.)
+    if not s.payload.targets:
+        return {
+            "staged": False,
+            "reason": "nothing fit the 1 MB /feedback gather budget — every session was "
+                      "dropped over-budget, so there is nothing to stage.",
+            "recommend": "shrink the bundle: drop extra_sessions, distill the largest "
+                         "session (distill_range) or send words-only, then re-assemble. "
+                         "assemble()'s over_budget list shows exactly what didn't fit.",
+            "over_budget": [p for p, _ in s.payload.dropped],
+        }
+
+    # The mechanism holds the floor: never stage a payload whose own bytes fail the
     # deterministic floor, regardless of whether the co-author ran leak_scan first.
     payload_gate = PL.egress_gate(PL.upload_text(s.payload),
                                   PL.content_surface(s.sanitized_raws or [], s.description))
@@ -454,18 +494,22 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
             "gather_floor_clean": False,
         }
 
-    # M3 — identify the LIVE session (the one /feedback co-uploads raw) by the freshest
+    # Identify the LIVE session (the one /feedback co-uploads raw) by the freshest
     # authoritative id: the skill's `live_session_id` if given, else the env-resolved id.
     # NOT the target id (s.session_id) — the target is usually a *past* session, and
-    # conflating them makes begin_swap's FIX-3 refuse to swap the legitimate target.
+    # conflating them makes begin_swap's live-id refusal block the legitimate target.
     info = L.resolve(cwd=s.cwd)
     live_id = live_session_id or info.get("live_session_id")
-    live_path = L.resolve(cwd=s.cwd, session_id=live_id).get("path") if live_id else None
+    # Resolve the live session BY ID — this anchors path + the windowing menu on the
+    # live file's OWN project dir (identity), so even if s.cwd is unknown we never
+    # window out an unrelated project's sessions (server-vs-user cwd).
+    live_info = L.resolve(cwd=s.cwd, session_id=live_id) if live_id else {}
+    live_path = live_info.get("path")
 
-    # FAIL-CLOSED: if we can't positively identify the live session, we can't prove what
-    # /feedback would co-upload — and begin_swap's FIX-3 identity refusal is also disabled
-    # without a live id. Don't assume clean (the cardinal-failure direction); recommend
-    # checkpoint or an explicit override. The skill should pass live_session_id.
+    # Fail-closed: if we can't positively identify the live session, we can't prove what
+    # /feedback would co-upload — and begin_swap's identity refusal is also disabled
+    # without a live id. Don't assume clean; recommend checkpoint or an explicit override.
+    # The skill should pass live_session_id.
     if not live_id and not allow_live_gate:
         return {
             "staged": False,
@@ -479,7 +523,7 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
     live_contrib: dict = {"path": None, "floor_clean": True}
     if live_path and os.path.isfile(live_path) and live_path not in s.payload.targets:
         live_text = Path(live_path).read_text(encoding="utf-8", errors="replace")
-        # M1 — the FULL deterministic egress scan over the raw live bytes (not just
+        # The FULL deterministic egress scan over the raw live bytes (not just
         # secrets+PII): a content-rich live session correctly trips the gate.
         live_findings = R_deterministic_leak_scan(live_text)
         by_cat: dict = {}
@@ -505,8 +549,11 @@ def submit_begin(session_id: str, allow_live_gate: bool = False,
         }
 
     # Age every OTHER past file in the project out of the +7d window (journaled).
+    # Prefer the live session's own project menu (identity-anchored); fall back to
+    # the cwd-resolved menu only if we couldn't resolve the live session by id.
     targets = set(s.payload.targets)
-    others = [c["path"] for c in (info.get("candidates") or [])
+    menu = live_info.get("candidates") or info.get("candidates") or []
+    others = [c["path"] for c in menu
               if c.get("path") and c["path"] not in targets and c["path"] != live_path]
     handle = P.begin_swap(s.payload.targets, live_session_id=live_id,
                           window_out=others, window="week")
@@ -528,7 +575,7 @@ def submit_finish(session_id: str, cwd: Optional[str] = None) -> dict:
     """Restore the originals byte-exact after the user's ``/feedback`` run
     (``finish_swap``). Idempotent.
 
-    S2 — if the in-memory journal path is gone (the MCP server restarted mid-flow),
+    If the in-memory journal path is gone (the MCP server restarted mid-flow),
     fall back to ``package.recover()`` SCOPED to this session's transcript path, so it
     restores THIS swap now without un-swapping a concurrent ``/fb`` flow's still-staged
     journal. Data was never at risk (the journal is durable); this just restores the
@@ -599,20 +646,26 @@ def policy_read(repo_path: str) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Question-loop (§14) — the CLI consumer of the org's open-questions list       #
+# Question-loop — the CLI consumer of the org's open-questions list             #
 # --------------------------------------------------------------------------- #
 def open_questions(report_context: str = "", surface: str = "cli",
                    cwd: Optional[str] = None) -> dict:
     """Return the SINGLE most-relevant open question for this report — never a survey.
 
-    Reads the living open-questions list produced by the Feedback OS (fb-os / Build 1)
-    at ``$FB_ASSIST_OPEN_QUESTIONS`` or ``~/.config/fb-assist/open-questions.json`` and
-    applies the SAME selection rule as ``fb_os.questions.rank_for`` (kept in sync so the
-    two ends can't drift): candidate = ``status=="open"`` AND not expired AND
-    (``match.surfaces`` empty OR ``surface`` in it); ``relevance`` = fraction of
-    ``match.keywords`` present in the report; ``score = priority × relevance``; return the
-    single argmax with ``score > 0``, else ``None``. This closes the CLI side of the
-    bidirectional question-loop (the producer is Build 1; the seam is this file's path)."""
+    Reads the living open-questions list produced by the Feedback OS (fb-os)
+    at ``$FB_ASSIST_OPEN_QUESTIONS`` or ``~/.config/fb-assist/open-questions.json``.
+
+    This is a faithful DUPLICATE of ``fb_os.questions.rank_for``'s selection rule, NOT
+    an import of it: ``fb-assist`` is a standalone, separately-clonable package and
+    cannot depend on ``fb-os``, so the rule is necessarily reimplemented here. The two
+    are pinned in lockstep by a shared-fixture seam test (fb-os ``tests/test_seam.py``)
+    so the duplicate can't drift. The rule: candidate = ``status=="open"`` AND not
+    expired AND (``match.surfaces`` empty OR ``surface`` in it); ``relevance`` = fraction
+    of ``match.keywords`` present in the report; ``score = priority × relevance``; return
+    the single argmax with ``score > 0`` and the SAME tie-break as ``rank_for`` —
+    ``(priority, uncertainty, id)`` highest-wins (a tie favors the question the org is
+    MOST uncertain about, i.e. most worth asking). This closes the CLI side of the
+    bidirectional question-loop (the producer is fb-os; the seam is this file's path)."""
     import json
     import os
     import datetime as _dt
@@ -630,16 +683,24 @@ def open_questions(report_context: str = "", surface: str = "cli",
     now = _dt.datetime.now(_dt.timezone.utc)
     report_low = (report_context or "").lower()
 
+    def _expired(exp) -> bool:
+        # Mirror fb_os.questions._parse_iso/is_expired: tolerate Z and naive stamps
+        # (coerce naive -> UTC) and never raise — an unparseable stamp is "not expired".
+        if not exp:
+            return False
+        try:
+            dt = _dt.datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+        except Exception:  # noqa: BLE001
+            return False
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_dt.timezone.utc)
+        return now >= dt
+
     def _is_open(q: dict) -> bool:
         if q.get("status") != "open":
             return False
-        exp = q.get("expires_at")
-        if exp:
-            try:
-                if now >= _dt.datetime.fromisoformat(str(exp).replace("Z", "+00:00")):
-                    return False
-            except ValueError:
-                pass
+        if _expired(q.get("expires_at")):
+            return False
         surfaces = (q.get("match") or {}).get("surfaces") or []
         return (not surfaces) or (surface in surfaces)
 
@@ -650,10 +711,13 @@ def open_questions(report_context: str = "", surface: str = "cli",
         return sum(1 for k in kws if k in report_low) / len(kws)
 
     cands = [q for q in data.get("questions", []) if _is_open(q)]
-    # score, then deterministic tie-break (priority desc, uncertainty asc, id)
+    # score desc, then the SAME deterministic tie-break as fb_os.questions.rank_for:
+    # (priority, uncertainty, id) highest-wins. Sort by the first four tuple slots only
+    # (ids are unique) so two dicts are never compared.
     scored = sorted(
-        ((q.get("priority", 0.0) * _relevance(q), q.get("priority", 0.0),
-          -q.get("uncertainty", 0.0), str(q.get("id", "")), q) for q in cands),
+        ((q.get("priority", 0.0) * _relevance(q), float(q.get("priority", 0.0)),
+          float(q.get("uncertainty", 0.0)), str(q.get("id", "")), q) for q in cands),
+        key=lambda t: t[:4],
         reverse=True,
     )
     best = None

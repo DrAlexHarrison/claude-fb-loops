@@ -1,29 +1,15 @@
-"""fb_os.questions — THE seam between Build 1 (Feedback OS) and Build 3 (the CLI).
+"""fb_os.questions — the seam between the org-side loop and the CLI co-author.
 
-This module owns ``open-questions.json``: the living, org-authored list of "things
-Anthropic currently wants to learn from its users." Build 1's triager produces it;
-Build 3's ``/fb`` co-author consumes it and asks **at most one** maximally-relevant
-probe per feedback session (co-author.md §44-46, cli-runtime-plan OPEN-3).
+Owns ``open-questions.json``: the triager produces it, the CLI's ``/fb``
+co-author consumes it and asks at most one relevant question per session.
+Both ends share the published JSON Schema, but the selection rule
+(:func:`rank_for`) is duplicated rather than imported — the CLI package is a
+separately-clonable sibling that can't depend on this one — and a
+shared-fixture seam test pins both copies to the same choice.
 
-Why this file is the keystone
------------------------------
-Both ends of the loop must agree, byte-for-byte, on:
-
-  1. the **schema** of the published file (``schema/open-questions.schema.json``), and
-  2. the **selection rule** — which single question to surface for a given report.
-
-If the producer and consumer drifted on either, the loop would silently break. So
-the selector lives **here**, in the package both ends import (:func:`rank_for`), and
-the published file is validated against the committed JSON Schema on every publish.
-
-Publication is **atomic** — it reuses :func:`fb_assist.package._atomic_write` (the
-same tmp+fsync+os.replace primitive Build 3 trusts for transcript swaps) so a
-running ``/fb`` never reads a half-written file (plan §8, "publish path collision").
-
-The published path is ``~/.config/fb-assist/open-questions.json`` — the exact path
-the CLI reads (overridable via ``$FB_ASSIST_OPEN_QUESTIONS`` for tests/demo).
-
-Pure stdlib + ``fb_assist`` + (optional) ``jsonschema``. No network. No paid software.
+Publication is atomic, so a running ``/fb`` never reads a half-written file.
+Published to ``~/.config/fb-assist/open-questions.json``. Pure stdlib +
+optional ``jsonschema``; no network, no paid software.
 """
 
 from __future__ import annotations
@@ -36,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence, Union
 
-# Reuse Build 3's proven atomic writer — do NOT reimplement (plan §8).
+# Reuse the CLI package's proven atomic writer — do NOT reimplement it here.
 _FB_ASSIST_DIR = Path(__file__).resolve().parent.parent.parent / "fb-assist"
 if _FB_ASSIST_DIR.is_dir() and str(_FB_ASSIST_DIR) not in sys.path:
     sys.path.insert(0, str(_FB_ASSIST_DIR))
@@ -51,7 +37,7 @@ ARTIFACT_SCHEMA = SCHEMA_DIR / "artifact.schema.json"
 
 VALID_STATUS = ("open", "answered", "retired")
 
-# The default surface the CLI runs on (cli-runtime-plan). rank_for filters to it.
+# The default surface the CLI runs on. rank_for filters to it.
 DEFAULT_SURFACE = "cli"
 
 # Selection floor: a candidate must clear this *score* (priority x relevance) to be
@@ -61,7 +47,7 @@ DEFAULT_SCORE_FLOOR = 0.0
 
 
 # --------------------------------------------------------------------------- #
-# Published-path resolution (the exact file Build 3 reads)                     #
+# Published-path resolution (the exact file the CLI reads)                     #
 # --------------------------------------------------------------------------- #
 def default_publish_path() -> Path:
     """``~/.config/fb-assist/open-questions.json`` — the path the CLI reads.
@@ -130,7 +116,7 @@ def next_question_id(existing_ids: Iterable[str], *, when: Optional[datetime] = 
 # --------------------------------------------------------------------------- #
 @dataclasses.dataclass
 class QuestionMatch:
-    """How the edge decides relevance — cheap, local, no model needed (plan §4.2)."""
+    """How the edge decides relevance — cheap, local, no model needed."""
     keywords: list[str] = dataclasses.field(default_factory=list)
     surfaces: list[str] = dataclasses.field(default_factory=lambda: [DEFAULT_SURFACE])
     embedding_ref: Optional[str] = None  # v-next: vector key for semantic match
@@ -274,7 +260,7 @@ def publish(qset: OpenQuestionSet, path: Optional[PathLike] = None, *, validate:
     """Atomically write ``qset`` to ``path`` (default: the canonical CLI path).
 
     Reuses ``fb_assist.package._atomic_write`` (tmp+fsync+os.replace) so a reader
-    sees the whole old file or the whole new one — never a torn write (plan §8).
+    sees the whole old file or the whole new one — never a torn write.
     Validates against the committed JSON Schema first unless ``validate=False``."""
     p = Path(path).expanduser() if path is not None else default_publish_path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -328,7 +314,7 @@ def merge(
     source_window: Optional[dict] = None,
 ) -> OpenQuestionSet:
     """Merge freshly-generated ``incoming`` questions into ``prior``, keeping ids
-    stable and retiring answered/expired ones (plan §6.5, §7 "Question lifecycle").
+    stable and retiring answered/expired ones.
 
     Matching rule (so a regenerated question reuses its id instead of duplicating):
     an incoming question matches a prior one when their ``cluster_id`` is equal (the
@@ -406,7 +392,8 @@ def _match_by_keywords(prior: list[OpenQuestion], cand: OpenQuestion,
 
 
 # --------------------------------------------------------------------------- #
-# rank_for — THE shared selector (imported by Build 3 so the ends cannot drift) #
+# rank_for — the shared selector (reimplemented in the CLI package, pinned by   #
+# a seam test)                                                                  #
 # --------------------------------------------------------------------------- #
 def _tokenize(text: str) -> set[str]:
     out: set[str] = set()
@@ -497,9 +484,13 @@ def rank_for(
     path: Optional[PathLike] = None,
 ) -> Optional[OpenQuestion]:
     """Return the single most-relevant open question for ``report_context``, or
-    ``None`` if nothing clears the ``floor``. **One. Never a survey** (co-author.md
-    §46) — Build 3 imports *this* function so the producer and consumer apply the
-    identical rule and cannot drift.
+    ``None`` if nothing clears the ``floor``. One question, never a survey. This
+    is the canonical selector; the standalone ``fb-assist`` CLI can't import
+    this package, so it reimplements this exact rule in
+    ``fb_assist.mcp_server.open_questions`` — and the seam test pins both to one
+    shared fixture so the duplicate can't drift. The tie-break on equal score is
+    ``(priority, uncertainty, id)`` highest-wins: a tie favors the question the
+    org is most uncertain about (most worth asking), then a stable id break.
 
     ``report_context`` is the current feedback report: a string, or a dict
     ``{"text": ..., "keywords": [...], "surface": "cli"}``. ``qset`` defaults to

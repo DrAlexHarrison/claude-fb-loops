@@ -1,4 +1,4 @@
-"""Tests for fb_assist.profile — the set-once privacy profile / policy store (spec §10).
+"""Tests for fb_assist.profile — the set-once privacy profile / policy store.
 
 The precedence engine is load-bearing: it decides what gets stripped before feedback ships,
 so most-specific-wins, the hard-floor guarantee, and the entity rescue/deny merge each get

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fb-loops.example/fb-os/open-questions.schema.json",
   "title": "open-questions.json",
-  "description": "The living org-authored question list Build 1 publishes and Build 3's /fb consumes. THE seam contract.",
+  "description": "The living org-authored question list fb-os publishes and the /fb co-author consumes. The seam contract.",
   "type": "object",
   "required": ["schema_version", "generated_at", "questions"],
   "additionalProperties": false,

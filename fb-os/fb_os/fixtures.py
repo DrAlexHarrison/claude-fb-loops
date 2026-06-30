@@ -1,6 +1,6 @@
 """fb_os.fixtures — generate synthetic ``stage_review`` bundles for the demo + tests.
 
-**Never Alex's real data** — every bundle here is hand-authored, already-redacted
+**Never real user data** — every bundle here is hand-authored, already-redacted
 synthetic feedback, written in the exact on-disk shape ``fb_assist.package.Payload.stage``
 produces (``description.txt`` + a per-session ``.jsonl`` + ``effort-signal.json``,
 and occasionally an additive ``artifact.json``). Used by ``make demo`` and the tests.

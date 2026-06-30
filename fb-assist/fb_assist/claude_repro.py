@@ -1,39 +1,17 @@
-"""fb_assist.claude_repro — the `claude-repro` API SDK surface (Build B).
+"""fb_assist.claude_repro — the `claude-repro` API SDK surface.
 
-The **API edge** of fb-assist: a pure *forward-transform* SDK that turns a
-developer's own Anthropic **Messages API** request/response into a privacy-clean,
-**request-id-anchored** repro they can voluntarily attach to a bug/feedback report
-— WITHOUT leaking secrets, PII, or proprietary prompt IP.
+Turns a developer's own Anthropic Messages API request/response into a
+privacy-clean, request-id-anchored repro suitable for attaching to a bug or
+feedback report — with no secrets, PII, or proprietary prompt content leaked.
 
-Why this is a separate module (and not just `redact.strip_categories`):
-`redact.strip_categories` is hard-bound to the **Claude Code JSONL envelope**
-(`message.content`, `toolUseResult`, `cwd`/`hookInfos`…). The Messages API is a
-*different shape* — `system`, `messages[].content[]` blocks (text / image /
-tool_use / tool_result / document / thinking), `tools`, `response.content[]`,
-`usage`. So this module ships a NEW structural stripper, :func:`strip_blocks`,
-that walks the Messages-API union — while **reusing the detection/replacement
-floor verbatim** from :mod:`fb_assist.redact` (`scan_secrets`, `scan_pii`,
-`apply_redactions`, `merge_redaction_spans`, `_token_label`, `leak_scan`) and the
-locator helpers from :mod:`fb_assist.transcripts` (`Span`, `replace_span`).
-
-The redaction recipe is identical in spirit to the CC edge (INTEGRATION.md):
-**strip bulk structural categories** (images, documents, tool-result bodies,
-opt-in tool definitions) **+ mask narrative char-precise** (system prompt,
-user/assistant text, thinking, tool_use inputs). Two-layer gate: a deterministic
-floor over the ACTUAL upload bytes (proven empty) + a soft NER `leak_scan` that
-yields self-repair candidates, never a veto.
-
-Public API:
-  - :func:`redact_pair`        request+response -> :class:`Artifact` (pure); optional
-                               ``genericize`` callback adds the C8 semantic layer
-  - :func:`make_ollama_genericizer`  zero-dep local-Ollama ``genericize`` callback (C8)
-  - :func:`strip_blocks`       the NEW Messages-API structural stripper
-  - :func:`narrative_spans`    locate maskable narrative across the pair
-  - :func:`message_text`       lenient `.text` over array-of-blocks OR bare-text
-  - :func:`extract_request_id` / :func:`anchor_for`   the verifiable anchor (FIX 5)
-  - :func:`build_artifact` / :func:`build_draft`      assemble + the support@ draft
-  - :class:`ReportingClient` (+ Bedrock/Vertex) ring-buffer wrapper, `report_last`
-  - :func:`from_otel_line` / :func:`from_langfuse` / :func:`from_helicone` ingest
+Ships its own structural stripper (:func:`strip_blocks`) for the Messages-API
+content-block shape, since that differs from the Claude Code JSONL envelope —
+while reusing the detection/replacement core from :mod:`fb_assist.redact` and
+the locator helpers from :mod:`fb_assist.transcripts`. Bulk categories
+(images, documents, tool-result bodies) are stripped outright; narrative text
+is masked char-precise, gated by a deterministic floor over the actual upload
+bytes plus a soft NER scan that only yields self-repair candidates, never a
+veto.
 """
 from __future__ import annotations
 
@@ -56,7 +34,7 @@ from . import redact as R
 from . import transcripts as T
 from .genericize import verify_genericization
 
-# The optional semantic-genericize callback (C8): a pure ``(text, context) -> text``
+# The optional semantic-genericize callback: a pure ``(text, context) -> text``
 # rewrite the CALLER supplies — their own Claude/LLM — that does the SEMANTIC layer
 # the deterministic floor cannot (codenames, "the patient in Room 11", proprietary
 # context). It is handed text that has ALREADY passed the deterministic mask (so no
@@ -130,7 +108,7 @@ def _to_plain(obj: Any) -> Any:
 
 
 def message_text(msg: Any) -> str:
-    """Lenient ``Message.text`` over BOTH shapes (00-MANDATORY-FIXES tail):
+    """Lenient ``Message.text`` over BOTH shapes:
 
       * an **array-of-blocks** ``content`` (the real Messages API shape) — joins
         every ``text`` (and ``thinking``) block;
@@ -191,13 +169,12 @@ def to_pair(request: Any, response: Any = None, request_id: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
-# FIX 5 — the verifiable anchor: request-id extraction + deterministic fallback
+# The verifiable anchor: request-id extraction + deterministic fallback
 # --------------------------------------------------------------------------- #
 def extract_request_id(obj: Any, *, provider: str = "anthropic") -> Optional[str]:
     """Pull the Anthropic ``request-id`` (``req_…``) from a response/stream.
 
-    Robust across (verified against ``anthropic 0.76.0`` — see
-    ``verification-evidence/REQUEST-ID-ANCHOR.md``):
+    Robust across known shapes (verified against ``anthropic`` SDK 0.76.0):
       * ``messages.create(...)`` -> ``Message`` exposing the public ``_request_id``
         attribute (absent from ``Message.model_fields``; set by ``add_request_id``);
       * ``stream.get_final_message()`` — the accumulated snapshot may LACK
@@ -233,11 +210,10 @@ def anchor_for(request: Optional[dict], response: Optional[dict],
 
     First-party Anthropic + a ``req_…`` id -> a **verifiable** request-id anchor
     (Anthropic can correlate it to its own 7-day server-side log with zero extra
-    user content). Otherwise (Bedrock/Vertex, or a missing/!``req_`` id) ->
-    a **deterministic** fallback ``{provider, provider_id, model, usage,
+    user content). Otherwise (Bedrock/Vertex, or a missing/non-``req_`` id) -> a
+    **deterministic** fallback ``{provider, provider_id, model, usage,
     fingerprint}`` that is NOT first-party-verifiable (flagged ``verifiable:
-    False``) but still uniquely identifies the interaction. This is FIX 5's
-    Bedrock/Vertex branch (``plans/00-MANDATORY-FIXES.md`` #5)."""
+    False``) but still uniquely identifies the interaction."""
     response = response or {}
     request = request or {}
     is_anthropic_rid = bool(request_id and str(request_id).startswith("req_"))
@@ -366,7 +342,7 @@ def strip_blocks(pair: ReproPair, categories: Iterable[str] = DEFAULT_STRIP,
 
     Narrative categories (system / user / assistant / thinking / tool_use input)
     are intentionally left for :func:`narrative_spans` + the char-precise mask.
-    Returns the list of strip *events* (for the FIX-6 redaction-map preview)."""
+    Returns the list of strip *events* (used to build the redaction-map preview)."""
     cats = set(categories)
     events: list[dict] = []
 
@@ -406,7 +382,7 @@ def _string_leaves(obj: Any, base: tuple) -> Iterator[tuple[tuple, str]]:
 
 def _span(category: str, path: tuple, text: str) -> T.Span:
     """Construct a transcripts.Span covering a WHOLE field (start=0..len) so the
-    INTEGRATION.md locator<->rmap bridge (`replace_span`) works unchanged."""
+    locator<->rmap bridge (`replace_span`) works unchanged."""
     return T.Span(category=category, line=0, uuid=None, field=_field_str(path),
                   path=path, start=0, end=len(text), text=text)
 
@@ -509,7 +485,7 @@ def _enforce_secret_floor(root: dict, rmap: list, max_iter: int = 4) -> int:
     The targeted narrative pass already masks the common case with nice entity labels;
     this sweep literal-removes any secret OR floor-PII value that survived in a
     non-narrative field (metadata, a kept tool-result leaf), so the hard gate can never
-    fail with one of those sitting in the bytes (M2). Returns the number removed."""
+    fail with one of those sitting in the bytes. Returns the number removed."""
     removed = 0
     for _ in range(max_iter):
         upload = json.dumps(root, ensure_ascii=False)
@@ -561,12 +537,12 @@ class Artifact:
     """The forward-transform output (the substrate a dev forwards to Anthropic)."""
     redacted_repro: dict              # {"request": …, "response": …} post-redaction
     request_id: Optional[str]         # req_…  (the anchor, when first-party)
-    anchor: dict                      # request_id OR deterministic fallback (FIX 5)
+    anchor: dict                      # request_id OR deterministic fallback
     provider: str
     structured_description: str
     effort_signal: dict
     redaction_map: list               # unified mask + strip events
-    preview: "ReproPreview"           # FIX 6 — built from redaction_map, not diff_preview
+    preview: "ReproPreview"           # built from redaction_map, not diff_preview
     hard_gate_pass: bool              # deterministic secret + PII-regex floor over upload == []
     leak_candidates: list = field(default_factory=list)  # soft NER self-repair candidates
 
@@ -590,10 +566,10 @@ def redact_pair(request: Any, response: Any = None, request_id: Optional[str] = 
     """PURE forward transform: request+response -> sanitized copy + :class:`Artifact`.
 
     Never mutates the caller's objects (everything is deep-copied via
-    :func:`to_pair`). Pipeline (INTEGRATION.md, retargeted to the Messages API):
+    :func:`to_pair`). Pipeline (retargeted to the Messages API):
       1) STRUCTURAL strip (bulk) via :func:`strip_blocks`;
       2) NARRATIVE mask (char-precise) via the locator<->rmap bridge;
-      2b) OPTIONAL SEMANTIC GENERICIZE (C8) — if ``genericize`` is given, the
+      2b) OPTIONAL SEMANTIC GENERICIZE — if ``genericize`` is given, the
          caller's own Claude/LLM rewrites each already-floored narrative span and the
          two-pass :func:`fb_assist.genericize.verify_genericization` gate runs over its
          output; any surviving leak fails CLOSED to the deterministic mask;
@@ -644,7 +620,7 @@ def redact_pair(request: Any, response: Any = None, request_id: Optional[str] = 
                     "entity": f.entity, "original": f.masked,
                     "replacement": f"‹{R._token_label(f.entity)}›", "count": 1,
                 })
-        # (2b) OPTIONAL semantic genericize (C8): the caller's own Claude/LLM rewrites
+        # (2b) OPTIONAL semantic genericize: the caller's own Claude/LLM rewrites
         #      the already-floored text; the two-pass verify_genericization gate runs
         #      over its output and we fail CLOSED to the deterministic mask on any leak.
         final_text = masked
@@ -656,7 +632,7 @@ def redact_pair(request: Any, response: Any = None, request_id: Optional[str] = 
     pair.request, pair.response = root["request"], root["response"]
 
     # (3) HARD GATE — deterministic secret + PII-regex floor over the real upload bytes
-    #     (M2: an email/IP/SSN in a non-narrative field must fail the gate too, not just
+    #     (an email/IP/SSN in a non-narrative field must fail the gate too, not just
     #     secrets — matching every other surface's floor).
     _enforce_secret_floor(root, rmap)
     pair.request, pair.response = root["request"], root["response"]
@@ -685,7 +661,7 @@ def redact_pair(request: Any, response: Any = None, request_id: Optional[str] = 
 
 
 # --------------------------------------------------------------------------- #
-# C8 — the pluggable semantic-genericize callback (the no-live-Claude seam)
+# The pluggable semantic-genericize callback (the no-live-Claude seam)
 # --------------------------------------------------------------------------- #
 def _apply_genericize_callback(callback: GenericizeCallback, before: str, masked: str,
                                sp: T.Span, provider: str, chosen: list,
@@ -805,16 +781,16 @@ def make_ollama_genericizer(*, model: str = "llama3.2", host: str = "http://127.
 
 
 # --------------------------------------------------------------------------- #
-# FIX 6 — the included/stripped PREVIEW built from the redaction_map directly
+# The included/stripped PREVIEW built from the redaction_map directly
 # --------------------------------------------------------------------------- #
 @dataclass
 class ReproPreview:
     """A thin, API-SHAPED included/stripped summary built from the redaction map.
 
-    FIX 6 (binding): ``package.diff_preview([request, response])`` yields
-    meaningless structural counts ("1 record modified") on a 2-element pair, so the
-    API preview is summarized from the ``redaction_map`` instead — per-category and
-    per-entity counts of what was masked vs structurally stripped."""
+    ``package.diff_preview([request, response])`` yields meaningless structural
+    counts ("1 record modified") on a 2-element pair, so the API preview is
+    summarized from the ``redaction_map`` instead — per-category and per-entity
+    counts of what was masked vs structurally stripped."""
     masked_total: int
     stripped_total: int
     by_category: dict
@@ -842,7 +818,7 @@ class ReproPreview:
 
 
 def preview_from_rmap(rmap: Iterable[Mapping[str, Any]], pair: Optional[ReproPair] = None) -> ReproPreview:
-    """Build the included/stripped preview straight from the redaction map (FIX 6)."""
+    """Build the included/stripped preview straight from the redaction map."""
     by_category: dict[str, int] = {}
     by_method: dict[str, int] = {}
     by_entity: dict[str, int] = {}
@@ -924,7 +900,7 @@ def build_effort_signal(pair: ReproPair, rmap: Iterable[Mapping[str, Any]], *,
         },
         "reputation_token": reputation_token,
     }
-    # C8 — record the semantic-genericize pass (categories/counts/verdicts only; never
+    # Record the semantic-genericize pass (categories/counts/verdicts only; never
     # a raw value), present only when a genericize callback was actually supplied.
     if genericize_stats is not None:
         signal["semantic_genericize"] = genericize_stats
@@ -1236,7 +1212,7 @@ class _RecordingStream:
     def get_final_message(self):
         msg = self._stream.get_final_message()
         if not self._recorded:
-            # FIX 5 streaming path: the snapshot may lack _request_id; the reliable
+            # Streaming path: the snapshot may lack _request_id; the reliable
             # source is stream.request_id (the response header).
             rid = getattr(self._stream, "request_id", None) or extract_request_id(msg)
             self._client._push(self._kwargs, msg, rid)
@@ -1297,7 +1273,7 @@ if _anthropic is not None:
 
     class ReportingBedrock(_RingBufferMixin, _anthropic.AnthropicBedrock):
         """Bedrock variant. The Anthropic ``request-id`` header may be ABSENT here →
-        :func:`anchor_for` falls back to the deterministic anchor (FIX 5)."""
+        :func:`anchor_for` falls back to the deterministic anchor."""
         def __init__(self, *a, report_buffer: int = 20, **kw):
             super().__init__(*a, **kw)
             self._install_ring(report_buffer, "bedrock")

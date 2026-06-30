@@ -10,11 +10,10 @@ commits/staging), else falls back to a filesystem walk that honors the obvious
 exclusions. Exit 0 = clean; exit 1 = a hit (printed with file:line).
 
 Intentional, documented NON-leaks (NOT flagged):
-  * ``.claude-michelle`` -> "michelle" account label in fb_assist/locate.py and
-    its test — a config-dir convention for a multi-account Claude Code setup,
-    frozen with the green source. It is a label, not personal data.
   * synthetic planted secrets in the test corpus (``sk-ant-…``/``AKIA…``/``ghp_…``
     constructed/fake values) — by design; allow-listed in .gitleaks.toml.
+  * the author's name in LICENSE / NOTICE / README / pyproject — public authorship,
+    not personal data, so the bare name is deliberately NOT forbidden here.
 """
 from __future__ import annotations
 
@@ -35,6 +34,9 @@ FORBIDDEN = [
     ("harrison" + r"\.alexander", "personal email handle"),
     ("saturday" + "morning", "company brand/domain (dead name)"),
     ("saturday" + r"\.fit", "company domain"),
+    (r"\bSat" + r"urday\b", "example brand placeholder (use the generic word)"),
+    (r"\.claude-(personal|mich" + r"elle)", "personal account-dir name"),
+    (r"\bmich" + r"elle\b", "personal account name"),
     ("SENTINEL_" + r"CANARY_\d+", "real verification sentinel"),
 ]
 _COMPILED = [(re.compile(p), label) for p, label in FORBIDDEN]

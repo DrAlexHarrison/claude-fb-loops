@@ -1,40 +1,14 @@
 """fb_assist.transcripts — Claude Code session-transcript extraction engine.
 
-The foundational primitive for Build 3 (`fb-assist`). It parses Claude Code's
-on-disk session transcripts (``~/.claude*/projects/<cwd-slug>/<sessionId>.jsonl``)
-and extracts *any* part on demand, so the co-author Claude can ask for "just the
-file-contents", "the exchange around this error", or "everything except the
-thinking blocks" — and so the redaction module knows *exactly where* every
-sensitive category lives (uuid + field + char-span).
+Parses on-disk session transcripts (``~/.claude*/projects/<cwd-slug>/<sessionId>.jsonl``)
+and extracts any part on demand by category, via ``Record``/``Span`` locators (uuid +
+field path + char-span) precise enough for a redactor to mask in place. stdlib-only,
+local-only, streams every file line-by-line (real transcripts run up to 76 MB).
 
-Design ethos (per the spec):
-  * Composable single-purpose functions the co-author wields freely. No rigid
-    pipeline — each function does one thing well.
-  * Clean importable API **and** an argparse CLI over the same functions.
-  * stdlib-only. LOCAL ONLY: nothing here egresses; it only reads/locates.
-  * STREAM. A real fixture is 76 MB — never load a whole file into memory.
-    Every reader iterates line-by-line and yields. Robust to malformed/partial
-    lines (skipped + counted).
-
-Core concepts
--------------
-``Record``  — one normalized JSONL record (line number + raw dict + envelope).
-``Span``    — a located piece of extractable content. Carries everything a
-              redactor needs to target it precisely:
-                category, line, uuid, field (human path), path (programmatic
-                key-tuple), start/end char offsets, the text, and meta.
-
-The locator is the load-bearing handoff. ``path`` is a tuple of dict-keys and
-list-indices navigating into ``Record.raw`` (use ``get_at`` / ``replace_span``);
-``start``/``end`` are char offsets into the string value at that path. A redactor
-can splice ``record[...][start:end]`` to mask in place.
-
-A subtle, important fact this engine surfaces: **tool output is stored twice** —
-once structured under top-level ``toolUseResult`` (e.g. ``toolUseResult.stdout``,
-``toolUseResult.file.content``) and once model-visible as a ``tool_result`` block
-inside the *next* user record's ``message.content``. Both upload via ``/feedback``;
-a redactor must scrub **both**. The extractors emit both, correlated by
-``meta['tool_use_id']``.
+Tool output is stored twice — structured under ``toolUseResult`` and again as a
+model-visible ``tool_result`` block in the next user record. Both upload via
+``/feedback``; the extractors emit both (correlated by ``meta['tool_use_id']``) so a
+redactor can scrub both copies.
 """
 
 from __future__ import annotations
@@ -82,6 +56,7 @@ __all__ = [
     "size_estimate",
     "redaction_map",
     "find_transcripts",
+    "default_roots",
     # locator helpers
     "get_at",
     "set_at",
@@ -543,6 +518,18 @@ def _tool_results(r: Record) -> Iterator[Span]:
             for path, s, leaf in _iter_string_leaves(val, ("toolUseResult", key)):
                 yield _mk(r, "tool_results", path, s,
                           structured=True, result_key=str(leaf), top_key=key)
+    elif isinstance(tur, (str, list)):
+        # Many tools — MCP servers especially — store the structured result as a
+        # bare string (a JSON-encoded payload, an error message) or a list, not a
+        # dict. That is still a SECOND on-disk copy that uploads via /feedback, so
+        # the net must char-span it too; otherwise a redactor scrubs the
+        # model-visible tool_result block above but leaves this structured copy
+        # (e.g. a serialized email thread, an error carrying an absolute path)
+        # intact. Its path differs from the model-visible copy, so both get
+        # located and the redactor dedupes by (line, field, start, end).
+        for path, s, leaf in _iter_string_leaves(tur, ("toolUseResult",)):
+            yield _mk(r, "tool_results", path, s,
+                      structured=True, result_key=str(leaf), top_key=None)
 
 
 # Structured path-bearing fields we know about, by record kind. Each entry is a
@@ -1111,6 +1098,38 @@ def project_slug(cwd: Union[str, Path]) -> str:
     return _SLUG_RE.sub("-", str(cwd))
 
 
+def default_roots() -> list[Path]:
+    """The ``projects`` parent dirs to scan, discovered generically for ANY user.
+
+    No account name is ever hardcoded. ``$CLAUDE_CONFIG_DIR`` (one explicit config
+    dir) wins; otherwise every Claude Code config dir is discovered by globbing
+    ``~/.claude*`` and keeping those that actually contain a ``projects/`` dir — so
+    a plain ``~/.claude`` install, a multi-account layout (``~/.claude`` plus any
+    ``~/.claude-<suffix>`` siblings), or a custom setup all resolve, with no
+    user-specific name baked into the source. The default ``~/.claude/projects`` is
+    always included (even before it exists on a fresh install) so the common
+    single-account case never resolves empty. Newest-first ordering is applied
+    later by :func:`find_transcripts` (mtime sort), so root order is irrelevant.
+    """
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR")
+    if cfg:
+        return [Path(cfg).expanduser() / "projects"]
+    home = Path.home()
+    default = home / ".claude" / "projects"
+    roots: list[Path] = [default]
+    seen = {default}
+    for cfg_dir in sorted(home.glob(".claude*")):
+        proj = cfg_dir / "projects"
+        if proj in seen:
+            continue
+        # A real config dir, not a stray file (e.g. ~/.claude.json) — and it must
+        # actually hold transcripts (a projects/ child) to count.
+        if cfg_dir.is_dir() and proj.is_dir():
+            roots.append(proj)
+            seen.add(proj)
+    return roots
+
+
 def find_transcripts(project_dir: Union[str, Path, None] = None,
                      window_hours: float | None = None,
                      roots: Iterable[Union[str, Path]] | None = None,
@@ -1124,7 +1143,10 @@ def find_transcripts(project_dir: Union[str, Path, None] = None,
     * ``project_dir`` — a specific ``<cwd-slug>`` dir to scan; OR
     * ``cwd`` — a working directory to slugify (:func:`project_slug`) and find
       across roots; OR
-    * ``roots`` — explicit ``projects`` parents (defaults to the three account dirs).
+    * ``roots`` — explicit ``projects`` parents (default: the Claude config dirs
+      discovered by :func:`default_roots` — ``$CLAUDE_CONFIG_DIR`` if set, else
+      every ``~/.claude*`` that holds a ``projects/`` dir; no account name is
+      hardcoded).
 
     Returns dicts: ``{path, size, mtime, session_id, project_dir}``."""
     out: list[dict] = []
@@ -1133,10 +1155,7 @@ def find_transcripts(project_dir: Union[str, Path, None] = None,
         candidate_dirs.append(Path(project_dir))
     else:
         if roots is None:
-            home = Path.home()
-            roots = [home / ".claude" / "projects",
-                     home / ".claude-personal" / "projects",
-                     home / ".claude-michelle" / "projects"]
+            roots = default_roots()
         slug = None
         if cwd is not None:
             slug = project_slug(cwd)

@@ -46,6 +46,3 @@ fb-os/build/
 mon-inotify.log
 inotify-proof.txt
 .claude/settings.local.json
-# ...but DO ship the pps-pipeline synthetic demo capture (creator "pps-fixture",
-# api.example.com — no real data; also regenerable via `make -C pps-pipeline fixture`).
-!pps-pipeline/fixtures/session-demo/network.har

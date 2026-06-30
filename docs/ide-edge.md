@@ -47,9 +47,9 @@ The **Claude VS Code Extension's native sidebar is a webview GUI, not the TUI** 
 
 **Net for the Extension GUI:** "Give feedback" → swap-restore territory (one HAR-style check to finalize the handoff); per-message thumbs → server-side-reference territory (no client redaction possible); survey → external/out-of-scope. The integrated terminal inside the same extension remains the 1:1 fallback.
 
-## ✅ VERIFIED by live test (Alex, 2026-06-30)
-Every previously-inferred claim was confirmed by driving the real IDEs:
-- **Check 1 — `/fb` lists in the native panel's `/` menu: YES.** Custom user skills *do* surface in the panel (the inferred-high-confidence claim is now observed).
+## IDE support (verified against the real IDEs)
+Confirmed by driving each surface:
+- **`/fb` lists in the native panel's `/` menu: YES.** Custom user skills surface in the panel.
 - **Check 2 — the panel calls `mcp__fb-assist__*`: YES.** `list_sessions` connected and ran (returned 2,120 sessions). (It also surfaced — and we fixed — an unbounded-output bug: `list_sessions` is now capped.)
 - **Check 4 — JetBrains zero-code: YES.** `claude` in Android Studio's integrated terminal, `/fb` → the co-author loaded, identical to bare CLI. The "it *is* the CLI" claim holds end-to-end.
 - **Check 5 — `mcp__ide__getDiagnostics` in the panel: NO (no-such-tool).** The `ide` MCP server doesn't appear at all in the panel session → the watcher's diagnostics-enriched signal is integrated-terminal-only; the universal `settings.json` hook is the panel's watcher signal.

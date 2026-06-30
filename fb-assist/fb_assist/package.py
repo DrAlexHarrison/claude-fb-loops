@@ -1,44 +1,15 @@
-"""Packaging + safe-submit primitives for fb-assist (Build 3).
+"""Packaging + safe-submit primitives for fb-assist.
 
-This module is the *non-destructive mechanism* that makes co-authored, redacted
-feedback safe to ship through Claude Code's real ``/feedback`` command.
+The non-destructive mechanism that makes co-authored, redacted feedback safe to ship
+through Claude Code's real ``/feedback`` command. ``/feedback`` reads transcripts from
+disk at submit time — mtime-windowed, newest-first, up to a 1 MB budget — rather than
+from memory, so sanitizing what Anthropic receives means transiently swapping the
+on-disk transcript for a redacted version around the submit, then restoring the
+original byte-for-byte (mtime included), even across a crash mid-swap.
 
-Why it exists (the empirically-verified integration — see ../verification-evidence/RESULTS.md):
-``/feedback`` does NOT read an in-memory copy of your past sessions; at submit
-time it ``readdir``s the current project's transcript dir, filters ``*.jsonl`` by
-mtime within the chosen window (this-session / +24h / +7d), and reads each file
-*from disk*, newest-first, up to a 1 MB total budget. The on-disk file is the
-source of truth. So the way to sanitize what Anthropic receives is to transiently
-swap the on-disk transcript for a redacted version *around* the submit, then put
-the original back — byte-for-byte, mtime and all.
-
-The cardinal rule (spec §15): **giving feedback must never degrade the user's own
-resumable history.** A destructive in-place overwrite is forbidden. Everything in
-:func:`swap_restore` is built to guarantee the original is restored even if the
-body raises, even if the process is killed mid-swap (durable journal + backups +
-:func:`recover`).
-
-Capabilities (all importable; CLI wraps them — see :func:`main`):
-
-* :func:`swap_restore`  — context manager: back up → atomically write sanitized →
-  yield (caller runs ``/feedback``) → restore + verify byte-exact. The load-bearing
-  safety core.
-* :func:`recover`       — crash recovery: restore any orphaned swaps from journals.
-* :func:`diff_preview`  — concise "included / stripped" summary for the gate.
-* :func:`budget_pack`   — relevance-ranked selection under the 1 MB cap; reports drops.
-* mtime helpers         — :func:`move_into_window` / :func:`move_out_of_window` /
-  :func:`windowed_mtimes` so the user controls exactly which sessions ``/feedback``
-  gathers (it only offers a coarse time window natively).
-* :func:`assemble_payload` — turn ``{description, redacted transcripts}`` into the
-  on-disk ``{path: bytes}`` layout ``/feedback`` will read.
-
-Sibling module ``fb_assist.transcripts`` (built in parallel) owns the JSONL parser,
-the per-category extractors, and the ``redaction_map``. Here a *record* is just a
-parsed JSON dict (one per JSONL line); see :data:`TRANSCRIPTS_CONTRACT` for the
-exact seam. This module is pure-stdlib (plus optional psutil/lsof for live-write
-detection) so it runs and tests standalone.
-
-Local only. No network. No paid software.
+Sibling module ``fb_assist.transcripts`` owns the JSONL parser and ``redaction_map``;
+see :data:`TRANSCRIPTS_CONTRACT` for the seam. stdlib-only (plus optional psutil/lsof
+for live-write detection); local only, no network.
 """
 
 from __future__ import annotations
@@ -50,6 +21,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -59,7 +31,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequenc
 
 PathLike = Union[str, os.PathLike]
 
-# /feedback's hard gather constraints, named once (binary-confirmed, 2.1.195).
+# /feedback's hard gather constraints, named once.
 FEEDBACK_BUDGET_BYTES = 1_000_000  # total across all gathered transcripts
 WINDOWS: "OrderedDict[str, float]" = OrderedDict(
     # name -> seconds back from "now" that /feedback's mtime filter reaches
@@ -73,7 +45,7 @@ DEFAULT_BACKUP_ROOT = Path(
     os.environ.get("FB_ASSIST_BACKUP_ROOT", str(Path.home() / ".cache" / "fb-assist" / "swap-backups"))
 )
 
-# Integration seam with fb_assist.transcripts (ToolExtract). Documented, not enforced.
+# Integration seam with fb_assist.transcripts. Documented, not enforced.
 TRANSCRIPTS_CONTRACT = """
 A *record* is one parsed JSON dict per JSONL line. Records carry an envelope
 (uuid, type, timestamp, cwd, gitBranch, sessionId, version, ...) and, for
@@ -175,7 +147,7 @@ class LiveTranscriptError(RuntimeError):
 
     The current (live) session's file is owned by Claude Code's writer; rewriting
     it under the writer risks interleaving/corruption. Past, closed sessions are
-    the safe, deterministic target (spec §15).
+    the safe, deterministic target.
     """
 
 
@@ -334,6 +306,12 @@ class SwapEntry:
     original_size: int
     sanitized_sha256: str
     sanitized_size: int
+    # Metadata captured so restore leaves NO observable change beyond timing.
+    # Optional (default None) for journal back-compat: a journal written by an older
+    # build lacks these keys, and _restore_journal_payload's ``if k in d`` filter
+    # simply omits them — restore then behaves exactly as that older build did.
+    original_mode: Optional[int] = None        # st_mode perm bits (e.g. 0o644)
+    original_mtime_ns: Optional[int] = None     # ns-exact mtime (float utime is lossy)
 
 
 @dataclasses.dataclass
@@ -374,9 +352,9 @@ def _write_journal(
         "created": time.time(),
         "pid": os.getpid(),
         "entries": [dataclasses.asdict(e) for e in entries],
-        # FIX 2 (mandatory): mtime-only edits to *other* transcripts (windowing) are
-        # journaled BEFORE they happen so recover()/finish_swap can undo them too.
-        # Without this the crash-self-healing guarantee was false for windowing.
+        # mtime-only edits to *other* transcripts (windowing) are journaled BEFORE
+        # they happen so recover()/finish_swap can undo them too — without this the
+        # crash-self-healing guarantee wouldn't hold for windowing.
         "mtime_edits": list(mtime_edits or []),
     }
     _atomic_write(jp, json.dumps(payload, indent=2).encode("utf-8"))
@@ -394,6 +372,18 @@ def _restore_entry(entry: SwapEntry) -> None:
             failures=[entry.real_path],
         )
     _atomic_write(entry.real_path, backup_bytes, mtime=entry.original_mtime)
+    # Re-apply the original metadata so the swap leaves no silent degradation
+    # (cardinal rule: never degrade the user's resumable history). _atomic_write's
+    # tmp file is born 0600 from mkstemp — so without this a 0644 transcript would
+    # come back 0600 — and its float-second utime drops sub-microsecond precision.
+    # Both fields are optional (older journals lack them → skipped, prior behavior).
+    # Best-effort: a metadata hiccup must not fail an already byte-exact restore.
+    if entry.original_mode is not None:
+        with contextlib.suppress(OSError):
+            os.chmod(entry.real_path, entry.original_mode)
+    if entry.original_mtime_ns is not None:
+        with contextlib.suppress(OSError):
+            os.utime(entry.real_path, ns=(entry.original_mtime_ns, entry.original_mtime_ns))
     with open(entry.real_path, "rb") as f:
         now_bytes = f.read()
     if _sha256(now_bytes) != entry.original_sha256:
@@ -418,6 +408,7 @@ class RestoreReport:
 _SWAP_ENTRY_KEYS = (
     "real_path", "backup_path", "original_sha256", "original_mtime",
     "original_size", "sanitized_sha256", "sanitized_size",
+    "original_mode", "original_mtime_ns",
 )
 
 
@@ -437,8 +428,8 @@ def _restore_journal_payload(data: Mapping[str, Any]) -> tuple[list[str], list[s
             restored.append(entry.real_path)
         except Exception as e:  # noqa: BLE001 - aggregate
             failures.append(f"{d.get('real_path', '?')}: {e}")
-    # FIX 2: undo mtime-only edits to other transcripts (windowing). A windowed
-    # file that has since vanished is not a failure — there's nothing to restore.
+    # Undo mtime-only edits to other transcripts (windowing). A windowed file that
+    # has since vanished is not a failure — there's nothing to restore.
     for m in data.get("mtime_edits", []):
         p = m.get("path")
         try:
@@ -474,15 +465,15 @@ def begin_swap(
     Guarantees are identical to :func:`swap_restore` (atomic, crash-durable,
     refuses live files), plus:
 
-    * **FIX 3 — live-file refusal by identity, not heuristic.** Claude Code writes
-      the current session's transcript per-turn, so the ``is_being_written``
-      heuristic false-negatives *between* turns. If ``live_session_id`` is given,
-      any target whose filename stem equals it is refused outright (the heuristic
-      stays as a secondary check). The safe target is always a *past/closed*
-      session, or a checkpointed one (spec §15).
-    * **FIX 2 — windowing is journaled.** ``window_out`` files (other transcripts
-      aged out of ``/feedback``'s gather window) have their original mtimes recorded
-      in the journal *before* any mtime is touched, and are restored by
+    * **Live-file refusal by identity, not just heuristic.** Claude Code writes the
+      current session's transcript per-turn, so the ``is_being_written`` heuristic
+      false-negatives *between* turns. If ``live_session_id`` is given, any target
+      whose filename stem equals it is refused outright (the heuristic stays as a
+      secondary check). The safe target is always a *past/closed* session, or a
+      checkpointed one.
+    * **Windowing is journaled.** ``window_out`` files (other transcripts aged out
+      of ``/feedback``'s gather window) have their original mtimes recorded in the
+      journal *before* any mtime is touched, and are restored by
       :func:`finish_swap`/:func:`recover`.
     """
     backup_root = Path(backup_root) if backup_root is not None else DEFAULT_BACKUP_ROOT
@@ -493,17 +484,17 @@ def begin_swap(
     # ---- Phase 1: pre-flight ALL targets. Nothing on disk changes if any fails.
     entries: list[SwapEntry] = []
     staged: list[tuple[str, bytes, float]] = []  # (real_path, sanitized_bytes, mtime_to_apply)
-    originals_by_path: dict[str, bytes] = {}      # S4: read each target ONCE, reuse for backup
+    originals_by_path: dict[str, bytes] = {}      # read each target ONCE, reuse for backup
     for path, sanitized in targets.items():
         if not isinstance(sanitized, (bytes, bytearray)):
             raise TypeError(f"sanitized content for {path} must be bytes, got {type(sanitized).__name__}")
         if not os.path.isfile(path):
             raise FileNotFoundError(f"swap target does not exist: {path}")
-        # FIX 3: refuse the live session by session-id identity first.
+        # Refuse the live session by session-id identity first.
         if not allow_live and live_session_id and Path(path).stem == live_session_id:
             raise LiveTranscriptError(
                 f"{path} is the live session ({live_session_id}); refusing to swap it. "
-                "Target a past/closed session, or checkpoint (/clear) first (spec §15)."
+                "Target a past/closed session, or checkpoint (/clear) first."
             )
         if not allow_live and is_being_written(path, settle_s=settle_s):
             raise LiveTranscriptError(
@@ -523,13 +514,15 @@ def begin_swap(
                 original_size=len(original),
                 sanitized_sha256=_sha256(bytes(sanitized)),
                 sanitized_size=len(sanitized),
+                original_mode=stat.S_IMODE(st.st_mode),
+                original_mtime_ns=st.st_mtime_ns,
             )
         )
         mtime = time.time() if set_mtime_now else st.st_mtime
         staged.append((path, bytes(sanitized), mtime))
 
     # ---- Phase 1b: pre-flight the windowing targets (record their CURRENT mtimes
-    # before we age them out, so the journal can undo it). FIX 2.
+    # before we age them out, so the journal can undo it).
     target_set = set(targets)
     mtime_edits: list[dict] = []
     window_plan: list[tuple[str, float]] = []  # (path, aged_mtime_to_apply)
@@ -548,7 +541,7 @@ def begin_swap(
     batch_dir = Path(tempfile.mkdtemp(prefix="swap-", dir=backup_root))
     try:
         for entry in entries:
-            # S4: reuse the phase-1 bytes (which `original_sha256` was computed from)
+            # Reuse the phase-1 bytes (which `original_sha256` was computed from)
             # instead of re-reading — a re-read could capture changed bytes whose hash
             # won't match, trapping the original in the .bak and failing restore.
             original = originals_by_path[entry.real_path]
@@ -567,7 +560,18 @@ def begin_swap(
         for (path, sanitized, mtime), entry in zip(staged, entries):
             _atomic_write(path, sanitized, mtime=mtime)
         for p, aged in window_plan:
-            os.utime(p, (aged, aged))
+            # Aging a sibling out of /feedback's gather window is a non-essential
+            # metadata nicety. If that sibling VANISHED between pre-flight and here
+            # (a concurrent /clear or session cleanup — common), it can no longer be
+            # gathered, so skipping it is safe — and we must NOT let it abort and roll
+            # back the user's already-applied target swap (the swap that matters). Its
+            # journaled mtime restore already tolerates a missing file. A still-present
+            # file that genuinely can't be aged still raises (fail-closed: leaving it
+            # gatherable could let /feedback co-upload it raw).
+            try:
+                os.utime(p, (aged, aged))
+            except FileNotFoundError:
+                continue
     except BaseException:
         # Roll back whatever we managed to change, then surface the error. The
         # caller never received a handle, so it cannot call finish_swap itself.
@@ -793,8 +797,25 @@ class PreviewSummary:
             tail += f"; dropped {self.dropped_records} bulk record{'' if self.dropped_records == 1 else 's'}"
         return f"Sending {kept} cleaned record{'' if kept == 1 else 's'}{sess}{tail}."
 
+    def _size_delta_note(self) -> str:
+        """Human-sane size-change phrase for the gate's STRIPPED line.
+
+        The bundle usually *shrinks* (bulk strips dwarf the markers), but on tiny
+        sessions the char-precise replacements + 3-byte ‹guillemets› can net it
+        slightly *larger*. The old ``-{bytes_saved} bytes, {pct}% smaller`` then
+        printed a confusing double-negative (e.g. ``--30 bytes, -30% smaller``) in
+        the very gate the user reads to decide whether to send. Report the signed
+        delta honestly instead — "smaller" only when it actually shrank.
+        """
+        delta = self.bytes_after - self.bytes_before  # >0 grew, <0 shrank, 0 same
+        pct = (100 * abs(delta) / self.bytes_before) if self.bytes_before else 0.0
+        if delta < 0:
+            return f"-{-delta:,} bytes, {pct:.0f}% smaller"
+        if delta > 0:
+            return f"+{delta:,} bytes larger (redaction markers cost a little)"
+        return "no net size change"
+
     def render(self, max_samples: int = 5) -> str:
-        pct = (100 * self.bytes_saved / self.bytes_before) if self.bytes_before else 0.0
         lines = [self.headline(), "", "Feedback bundle — what will be sent:"]
         lines.append(
             f"  INCLUDED : {self.kept_records} records"
@@ -808,7 +829,7 @@ class PreviewSummary:
             strip_bits.append(f"{self.modified_records} records redacted")
         lines.append(
             f"  STRIPPED : {', '.join(strip_bits) or 'nothing'}"
-            f"  (-{self.bytes_saved:,} bytes, {pct:.0f}% smaller)"
+            f"  ({self._size_delta_note()})"
         )
         if self.dropped_by_type:
             by_type = ", ".join(f"{n}×{t}" for t, n in sorted(self.dropped_by_type.items(), key=lambda kv: -kv[1]))
@@ -903,7 +924,12 @@ def diff_preview(
         dropped_by_type=dict(dropped_by_type),
         stripped_by_category=dict(stripped_by_category),
         samples=uniq,
-        sessions=len({r.get("sessionId") for r in redacted_records if r.get("sessionId")}) or 1,
+        # Count distinct sessions from the ORIGINAL records, not the redacted ones:
+        # the env_metadata strip masks every redacted record's sessionId to the
+        # constant ‹sessionId›, which would collapse any multi-session bundle to 1
+        # and silently suppress the "across N sessions" headline/line. The originals
+        # still carry the real distinct ids.
+        sessions=len({r.get("sessionId") for r in original_records if r.get("sessionId")}) or 1,
     )
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FIX-5 live verification — `response._request_id` is the verifiable anchor.
+"""Live verification — `response._request_id` is the verifiable anchor.
 
 The whole `claude_repro` anchor story rests on a single empirical fact that a
 type-check CANNOT confirm: `_request_id` is a *per-response* attribute the SDK

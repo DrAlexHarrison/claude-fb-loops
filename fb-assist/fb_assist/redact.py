@@ -1,21 +1,13 @@
-"""fb_assist.redact — composable detection + redaction primitives for fb-assist (Build 3).
+"""fb_assist.redact — composable detection + redaction primitives.
 
-The DETERMINISTIC FLOOR of the redaction toolbox. Single-purpose functions the
-co-author Claude composes freely; an LLM (Claude) genericize pass is the semantic
-ceiling and is wired in later — this module is the auditable, offline floor.
+The deterministic floor of the redaction toolbox: secrets (gitleaks +
+detect-secrets + regex), PII (Presidio + GLiNER zero-shot NER), structural
+strips by transcript category, reversible tokenization, and an adversarial
+egress gate (``leak_scan``) over the outbound bundle. A semantic LLM genericize
+pass sits above this as the ceiling; this module stays auditable and offline.
 
-Layers (per 00-investigation-findings.md §3A — "layering mandatory"):
-  - secrets : gitleaks + detect-secrets + high-value regex   -> scan_secrets()
-  - PII     : Microsoft Presidio (spaCy) + GLiNER (zero-shot) -> scan_pii() / anonymize_pii()
-  - structural strips by transcript category                 -> strip_categories()
-  - reversible tokenization (consistent ‹PERSON_1› handles)  -> reversible_tokenize()
-  - adversarial egress gate over the outbound bundle         -> leak_scan()
-
-Operates on raw text AND on parsed transcript records (a record == one parsed JSONL
-line, schema per 00-investigation-findings.md §2.2 + the shared category vocabulary).
-
-LOCAL ONLY. Nothing in this module performs network egress except a one-time,
-cached model download from Hugging Face. No transcript content ever leaves the box.
+Local only — no network egress except a one-time, cached model download from
+Hugging Face. No transcript content ever leaves the box.
 """
 
 from __future__ import annotations
@@ -44,7 +36,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable, Optional
 
 # --------------------------------------------------------------------------- #
-# Shared category vocabulary (MUST match ToolExtract's transcripts.py)
+# Shared category vocabulary (must match transcripts.py)
 # --------------------------------------------------------------------------- #
 CATEGORIES = [
     "human_prompts",
@@ -229,10 +221,21 @@ def _scan_secrets_gitleaks(text: str) -> list[Finding]:
     for item in data:
         secret = item.get("Secret") or item.get("Match") or ""
         rule = item.get("RuleID") or "gitleaks"
-        start = text.find(secret) if secret else -1
-        end = start + len(secret) if start >= 0 else -1
-        out.append(Finding("gitleaks", "secret", rule, secret, start, end, 1.0, "critical",
-                           redactable=start >= 0))
+        # gitleaks reports one hit per finding, but the same secret can recur in the
+        # text. text.find() spans only the FIRST copy, leaving later copies at
+        # start=-1 (redactable=False) — a residual where a repeated secret could
+        # survive a value_consistent=False redaction. Emit a span for EVERY literal
+        # occurrence (matching the regex floor's finditer behavior) so all copies
+        # are redactable. Fall back to one non-redactable finding only when the
+        # secret string can't be located verbatim (empty / re-encoded match text).
+        spans = list(re.finditer(re.escape(secret), text)) if secret else []
+        if spans:
+            for m in spans:
+                out.append(Finding("gitleaks", "secret", rule, secret,
+                                   m.start(), m.end(), 1.0, "critical"))
+        else:
+            out.append(Finding("gitleaks", "secret", rule, secret, -1, -1, 1.0,
+                               "critical", redactable=False))
     return out
 
 
@@ -273,11 +276,18 @@ def _scan_secrets_detect_secrets(text: str) -> list[Finding]:
                     if s.type in _DS_SKIP_TYPES:
                         continue
                     val = getattr(s, "secret_value", None) or ""
-                    col = line.find(val) if val else -1
-                    start = offset + col if col >= 0 else -1
-                    end = start + len(val) if start >= 0 else -1
-                    out.append(Finding("detect-secrets", "secret", s.type, val, start, end,
-                                       0.9, "high", redactable=start >= 0))
+                    # Same first-occurrence limitation as gitleaks: line.find() spans
+                    # only the first copy on the line. Emit one span per literal
+                    # occurrence so a value repeated on a line is fully redactable.
+                    matches = list(re.finditer(re.escape(val), line)) if val else []
+                    if matches:
+                        for m in matches:
+                            start = offset + m.start()
+                            out.append(Finding("detect-secrets", "secret", s.type, val,
+                                               start, start + len(val), 0.9, "high"))
+                    else:
+                        out.append(Finding("detect-secrets", "secret", s.type, val, -1, -1,
+                                           0.9, "high", redactable=False))
                 offset += len(line) + 1
     except Exception:
         return []
@@ -298,9 +308,9 @@ def scan_secrets(text: str, use_gitleaks: bool = True, use_detect_secrets: bool 
 # --------------------------------------------------------------------------- #
 # PII detection (Presidio + GLiNER)
 # --------------------------------------------------------------------------- #
-# Deterministic PII floor. Per the investigation ("regex email beats all NER"),
-# a plain email regex catches addresses with any TLD (incl. reserved .example /
-# .test / .invalid) that Presidio's stricter pattern rejects and NER may miss.
+# Deterministic PII floor: a plain email regex catches addresses with any TLD
+# (incl. reserved .example / .test / .invalid) that Presidio's stricter pattern
+# rejects and NER may miss.
 _PII_REGEX: list[tuple[str, str, str]] = [
     ("EMAIL_ADDRESS", r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b", "medium"),
     ("IP_ADDRESS", r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b", "medium"),
@@ -727,6 +737,10 @@ def _strip_tool_results(rec: dict, cats: set, names: dict, mode: str) -> None:
             for k in ("stdout", "stderr"):
                 _replace_value(tur, k, "bash_output", mode)
         elif category == "websearch":
+            # The search QUERY is websearch content too (transcripts._websearch
+            # flags toolUseResult.query) and reveals exactly what the user searched
+            # for — scrub it alongside the results/links, or it survives the strip.
+            _replace_value(tur, "query", "websearch", mode)
             for k in ("results", "links", "content"):
                 if k in tur:
                     tur[k] = _mark("websearch")
@@ -788,7 +802,13 @@ def _deep_scrub_paths(obj: Any) -> Any:
             # Paths leak through dict KEYS too — e.g. file-history-snapshot records
             # key `trackedFileBackups` by absolute path. Scrub the key as well.
             nk = _scrub_paths_in_str(k) if isinstance(k, str) else k
-            if k in ("filePath", "file_path", "cwd", "workingDirectory") and isinstance(v, str):
+            # Structured path-bearing keys transcripts._paths flags. _PATH_RE only
+            # catches /home, /Users, /root and C:\Users absolutes, so a RELATIVE or
+            # non-home value here (outputFile "build/out/x.pdf", a bare attachment
+            # filename, a memory path) would otherwise survive the paths strip.
+            # Scrub the value whole whenever the KEY names a path/file field.
+            if k in ("filePath", "file_path", "cwd", "workingDirectory",
+                     "outputFile", "filename", "path") and isinstance(v, str):
                 out[nk] = "‹path›"
             else:
                 out[nk] = _deep_scrub_paths(v)
@@ -796,14 +816,29 @@ def _deep_scrub_paths(obj: Any) -> Any:
     return obj
 
 
+# Top-level env-metadata fields. MUST cover everything transcripts._env_metadata
+# locates, or strip_categories(["env_metadata"]) leaves an identity/topic leak the
+# hard gate can't catch (these aren't secrets/PII-floor matches): the envelope
+# version/cwd/branch + sessionId, the assistant-record requestId, the session
+# titles + agent identity (aiTitle/customTitle/agentName — they name the topic and
+# project), and the pr-link repo+number. workingDirectory/commitSha/platform/
+# terminal/teammateIds are extra defensive coverage the extractor doesn't emit but
+# which are unambiguously env metadata. (message.model is nested — scrubbed below.)
 _ENV_FIELDS = ("cwd", "gitBranch", "version", "entrypoint", "userType",
-               "workingDirectory", "commitSha", "platform", "terminal", "teammateIds")
+               "workingDirectory", "commitSha", "platform", "terminal", "teammateIds",
+               "sessionId", "requestId", "aiTitle", "customTitle", "agentName",
+               "prUrl", "prRepository")
 
 
 def _strip_env(rec: dict, mode: str) -> None:
     for k in _ENV_FIELDS:
-        if k in rec and rec[k] not in (None, ""):
+        if k in rec and rec[k] not in (None, "", [], {}):
             rec[k] = f"‹{k}›"
+    # The model id lives at message.model on assistant records — env_metadata per
+    # the extractor, and a fingerprint of which Claude generated the turn.
+    msg = rec.get("message")
+    if isinstance(msg, dict) and isinstance(msg.get("model"), str) and msg["model"]:
+        msg["model"] = "‹model›"
     tur = rec.get("toolUseResult")
     if isinstance(tur, dict):
         for k in ("cwd", "gitBranch", "version"):
@@ -829,11 +864,18 @@ def _is_hook_record(rec: dict) -> bool:
 def _strip_hook(rec: dict, mode: str) -> None:
     att = rec.get("attachment")
     if isinstance(att, dict) and (str(att.get("type", "")).startswith("hook") or "hookName" in att):
-        for k in ("stdout", "stderr", "content"):
+        # `command` carries the hook's invoked command line (paths/args/secrets) and
+        # is flagged by transcripts._hook_output — scrub it alongside the streams.
+        for k in ("stdout", "stderr", "content", "command"):
             _replace_value(att, k, "hook_output", mode)
     for k in ("hookAdditionalContext", "hookInfos", "hookErrors"):
         if k in rec and rec[k]:
             rec[k] = _mark("hook_output")
+    # system / stop_hook_summary records hold the hook's emitted text at top-level
+    # `content` (the second shape _hook_output extracts) — the attachment branch
+    # above never reaches it, so it would otherwise survive the hook_output strip.
+    if rec.get("type") == "system" and rec.get("subtype") == "stop_hook_summary":
+        _replace_value(rec, "content", "hook_output", mode)
 
 
 _MEMORY_MARKERS = ("MEMORY.md", "CLAUDE.md", "/memory/", "nested_memory", "additionalContext")
@@ -846,6 +888,15 @@ def _strip_memory(rec: dict, mode: str) -> None:
     atype = str(att.get("type", ""))
     blob = json.dumps(att) if att else ""
     if atype == "nested_memory" or any(m in blob for m in _MEMORY_MARKERS):
+        # nested_memory stores the memory body at attachment.content.content (a
+        # dict), with a flat attachment.content string only as a fallback.
+        # _replace_value only handles strings, so it would no-op on the dict and
+        # leave the injected CLAUDE.md/MEMORY.md body unscrubbed. Scrub the nested
+        # dict's body first, then the flat-string shape.
+        inner = att.get("content")
+        if isinstance(inner, dict):
+            for k in ("content", "stdout", "stderr"):
+                _replace_value(inner, k, "injected_memory", mode)
         for k in ("stdout", "content", "stderr"):
             _replace_value(att, k, "injected_memory", mode)
 
@@ -950,17 +1001,17 @@ def leak_scan(bundle_text: str, use_gliner: bool = True) -> list[Finding]:
 
 
 def deterministic_leak_scan(text: str) -> list[Finding]:
-    """The FP-resistant egress scan for RAW, un-redacted bytes — e.g. the live
+    """The FP-resistant egress scan for raw, un-redacted bytes — e.g. the live
     session's on-disk transcript that ``/feedback`` would co-upload.
 
-    Runs ONLY the deterministic detectors: secrets + the PII regex floor + filesystem
-    paths + env-metadata (``cwd``/``gitBranch``/``commitSha``/IP) + proprietary-IP
-    markers. It deliberately omits the NER pass (Presidio/GLiNER), because over raw
-    JSONL the NER hallucinates PII from structural tokens (gotcha #2) — so a raw-bytes
-    gate built on NER would false-positive constantly. Catching paths + env + the
-    floor is exactly what the secret+PII-only floor missed: a content-rich live
-    session (file bodies, paths, cwd/gitBranch) now correctly trips the gate and
-    routes the user to checkpoint-then-submit.
+    Runs only the deterministic detectors: secrets + the PII regex floor +
+    filesystem paths + env-metadata (``cwd``/``gitBranch``/``commitSha``/IP) +
+    proprietary-IP markers. It deliberately omits the NER pass (Presidio/GLiNER):
+    over raw JSONL, NER hallucinates PII from structural tokens, so a raw-bytes
+    gate built on NER would false-positive constantly. Paths + env + the floor
+    catch what the secret+PII-only floor misses — a content-rich live session
+    (file bodies, paths, cwd/gitBranch) correctly trips the gate and routes the
+    user to checkpoint-then-submit.
 
     Returns a deduped, severity-sorted list (empty == nothing a deterministic
     detector can see in the raw bytes)."""

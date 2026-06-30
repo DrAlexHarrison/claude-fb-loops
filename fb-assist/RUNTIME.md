@@ -20,7 +20,7 @@ USE_TF=0 python -m pytest -q            # expect all green
 > **Note (GLiNER / TensorFlow):** export `USE_TF=0` before running anything — transformers' TF path breaks under Keras 3. The modules set it defensively at import, and CI exports it too.
 
 ## Register the MCP server (one entry in `~/.claude.json`)
-Add under the project (or top-level `mcpServers` for global / always-on). Mirrors the `h1-brain` pattern:
+Add under the project (or top-level `mcpServers` for global / always-on):
 ```jsonc
 "fb-assist": {
   "type": "stdio",
@@ -54,7 +54,7 @@ In any Claude Code session: **`/fb`** (or `/fb express` for a fast hard-send, or
 3. you run `/feedback` (a separate turn) — it reads the sanitized file,
 4. `submit_finish` restores the original byte-exact (sha256-verified).
 
-If the process is killed between 2 and 4, `/fb`'s startup `recover_orphans()` (or `python -m fb_assist.package recover`) restores it. **Your resumable history is never degraded** — that's the cardinal rule (spec §15).
+If the process is killed between 2 and 4, `/fb`'s startup `recover_orphans()` (or `python -m fb_assist.package recover`) restores it. **Your resumable history is never degraded** — that's the cardinal rule.
 
 ## Library CLIs (no MCP needed)
 ```bash

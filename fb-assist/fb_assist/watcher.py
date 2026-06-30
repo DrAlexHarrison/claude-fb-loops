@@ -1,34 +1,14 @@
-"""fb_assist.watcher — the frustration/delight signal-capture hook (spec §11).
+"""fb_assist.watcher — the frustration/delight signal-capture hook.
 
-Why this exists: the highest-signal feedback is the bug or the breakthrough that
-*nobody bothers to report* — it evaporates the moment the user moves on. This hook
-watches Claude Code's session events for a few **high-precision** tells (a retry
-storm, a rage pattern, an "ugh/wtf" or a "perfect/finally") and offers a single,
-tiny, one-tap ``/fb`` nudge. It is the "catch what evaporates" surface.
+The bug or breakthrough nobody bothers to report evaporates the moment the user moves
+on. This hook watches Claude Code session events for a few high-precision tells (a
+retry storm, a rage pattern, "ugh/wtf", "perfect/finally") and offers a single one-tap
+``/fb`` nudge — precision over recall, since a false nudge nags, and each signal-class
+fires at most once per session. Nothing is ever sent; only the triggering needle + turn
+range is recorded for ``/fb`` to pick up. As a hook it always exits 0 and never raises —
+a hook must never break the session.
 
-Design constraints, all load-bearing (spec §11 + cli-runtime-plan §6):
-  * **High precision over recall** — favor false negatives; a false nudge nags.
-  * **Offer ONCE per signal-class per session** — never re-nag (a ``notified`` set).
-  * **Non-blocking** — a one-line ``additionalContext`` string, never a popup; the
-    hook always exits 0 and never raises (a hook must never break the session).
-  * **Consent-first, pre-drafted** — it never sends anything; it records the
-    triggering needle + approximate turn range into per-session state so that when
-    the user *does* run ``/fb``, the co-author picks the moment up instantly.
-  * **Fully disable-able** — a single ``watcher.off`` file silences everything.
-
-Architecture: the I/O glue is intentionally thin (read one JSON object from stdin,
-dispatch by event, maybe print one JSON object to stdout). All judgement lives in
-small **pure** functions (:func:`detect_sentiment`, :func:`register_tool_event`,
-:func:`detect_rage`, :func:`should_notify`, :func:`record_predraft`) so they are
-directly unit-testable without spawning a process.
-
-Invoked by Claude Code as a hook: ``python -m fb_assist.watcher <EventName>`` with
-the hook's JSON payload on stdin. Wired (cli-runtime-plan C2) on UserPromptSubmit,
-PostToolUse, and SessionEnd/Stop. Only UserPromptSubmit can surface a nudge (it is
-the one event whose ``additionalContext`` is injected back to the model), so signals
-detected on PostToolUse (retry storms) are *staged* and flushed on the next prompt.
-
-Pure-stdlib. No network. No sibling imports — it must run standalone as a hook.
+Pure-stdlib, no network, no sibling imports — it must run standalone as a hook.
 """
 
 from __future__ import annotations
@@ -294,7 +274,7 @@ def record_predraft(
     turn_range: Optional[Sequence[int]] = None,
     now: Optional[float] = None,
 ) -> dict:
-    """Stash the consent-ready handoff for ``/fb`` (the pre-draft, spec §11).
+    """Stash the consent-ready handoff for ``/fb`` (the pre-draft).
 
     Records *what* tripped the signal (``needle``) and *roughly where* (an
     approximate ``turn_range`` + ``turn`` + ``timestamp``) so saying "yes" to the

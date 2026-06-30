@@ -1,73 +1,36 @@
-"""fb_assist.reference_intake — a DROP-IN reference of an Anthropic ``/v1/feedback``
-intake endpoint for ``claude_repro`` artifacts (the API-surface counterpart to
-:mod:`fb_assist.server_side`).
+"""fb_assist.reference_intake — a runnable reference implementation of an
+Anthropic ``POST /v1/feedback`` intake endpoint for ``claude_repro`` artifacts
+(the API-surface counterpart to :mod:`fb_assist.server_side`). Anthropic ships
+no such endpoint today, so on its own ``claude_repro`` can only draft an email
+to ``support@`` — this module is the missing other half, built only against
+the public Messages-API shape (the ``request-id`` returned on every response
+header, and the request/response JSON a developer already holds), with no
+assumptions about how Anthropic actually stores feedback or scores reputation.
 
-WHAT THIS IS
-------------
-:mod:`fb_assist.claude_repro` lets a developer turn an Anthropic **Messages API**
-request/response into a privacy-clean, request-id-anchored repro — but today there
-is **nowhere to send it**: Anthropic ships *no* feedback-intake endpoint, so the SDK
-can only draft an email to ``support@``. This module is the missing other half: a
-runnable, framework-agnostic, stdlib-only **reference** of what an Anthropic
-``POST /v1/feedback`` intake **would** look like — the same port/adapter shape as
-:mod:`fb_assist.server_side`, so an Anthropic engineer implements ONE small adapter
-(the :class:`FeedbackSink`) against their real store and the privacy-bearing core —
-the fail-closed deterministic floor, the verifiable request-id anchor check, and the
-optional reputation-token verification — is already done, tested, and reusable.
-
-Together the two modules show the WHOLE loop:
+Together the two modules show the whole loop:
 
     claude_repro.redact_pair(...)        # SDK: redact locally + anchor on request-id
         -> Artifact {request_id, redacted_repro, effort_signal, reputation_token?}
     reference_intake.intake(submission)  # this module: validate + accept (or reject)
         -> IntakeReceipt {accepted | rejected, anchor, reputation, floor verdict}
 
-⚠️ THE PRINCIPLED BOUNDARY (load-bearing) ⚠️
---------------------------------------------
-This file is **reference-not-deployed**. It is built **only** against the PUBLIC
-Anthropic Messages-API shape — the ``request-id`` (``req_…``) returned on every
-response header, and the request/response JSON a developer already holds. It makes
-**ZERO Anthropic-internal assumptions**: nothing about how Anthropic stores feedback,
-correlates request-ids, or scores reputation. Everything it cannot know becomes the
-single adapter **PORT** below.
+:func:`intake` validates an inbound artifact end to end: shape, the fail-closed
+deterministic secret/PII floor over the raw bytes (:mod:`fb_assist.redact`'s
+``scan_secrets`` + ``_scan_pii_regex``), the request-id anchor (or the
+deterministic-fingerprint fallback for a non-Anthropic provider), and an
+optional reputation token via :func:`fb_assist.reputation.verify_token` — then
+routes the result to a single :class:`FeedbackSink` port, the one seam a real
+deployment implements against its own store.
 
-THE PORT (the one seam an Anthropic engineer implements)
---------------------------------------------------------
-  * :class:`FeedbackSink` — ``store(report_id, receipt, accepted) -> None``. The seam
-    to wherever accepted feedback is durably written. The :class:`AcceptedReport` is
-    already privacy-clean by the time it reaches here; the sink only persists it.
-
-THE INTAKE CONTRACT (what the endpoint enforces)
-------------------------------------------------
-:func:`intake` is the whole step. Over an inbound ``claude_repro`` artifact it:
-
-  1. **shape-validates** the submission (``redacted_repro`` present + dict);
-  2. runs the **fail-closed deterministic floor** over the *inbound bytes* — the
-     exact :mod:`fb_assist.redact` gate (``scan_secrets`` + ``_scan_pii_regex``) —
-     and **rejects anything that still carries a secret/PII** (an under-redacted or
-     tampered artifact never enters the store);
-  3. **verifies the anchor** — the ``request_id`` must match the Anthropic
-     ``req_…`` shape (the verifiable anchor that ties the report to a real metered
-     call); a non-Anthropic provider may instead present the deterministic-fingerprint
-     fallback (accepted, flagged ``verifiable: False``);
-  4. **optionally verifies the reputation token** via
-     :func:`fb_assist.reputation.verify_token`, bound to the submission's
-     ``effort_signal`` — a forged / lifted / stale / revoked token is rejected; a
-     valid one credits its pseudonymous id; an unverifiable-by-design (hmac, no shared
-     secret) token is accepted uncredited;
-  5. routes the result to the :class:`FeedbackSink` — storing the privacy-clean
-     :class:`AcceptedReport` on accept, or only the (value-free) :class:`IntakeReceipt`
-     on reject.
-
-Reference adapters (:class:`InMemoryFeedbackSink`) + :func:`make_reference_app` make
-the whole thing RUN in-repo over a stdlib ``http.server``. Run the demo:
+Reference adapters (:class:`InMemoryFeedbackSink`, :func:`make_reference_app`)
+make the whole thing run in-repo over a stdlib ``http.server``. Run the demo:
 
     python -m fb_assist.reference_intake            # SDK -> intake, end to end
     python -m fb_assist.reference_intake --leak     # show the floor reject a leak
     python -m fb_assist.reference_intake --serve     # the illustrative HTTP endpoint
 
-LOCAL ONLY. No network egress (the optional GLiNER PII pass is off by default). Pure
-validation: the inbound submission is never mutated.
+Local only — no network egress (the optional GLiNER PII pass is off by default).
+The inbound submission is never mutated.
 """
 
 from __future__ import annotations

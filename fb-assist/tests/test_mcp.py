@@ -113,7 +113,7 @@ def _extra_records() -> list[dict]:
 
 
 def test_assemble_bundles_extra_sessions(seeded, tmp_path):
-    """#4 — extra_sessions are parsed, redacted, and bundled alongside the primary;
+    """extra_sessions are parsed, redacted, and bundled alongside the primary;
     every bundled session is sanitized and counted, and the swap covers them all."""
     sid, primary, _ = seeded
     extra = tmp_path / f"{_EXTRA_SID}.jsonl"
@@ -188,7 +188,7 @@ def test_submit_begin_finish_nondestructive(seeded):
 
 
 def test_submit_begin_refuses_dirty_live_session(seeded, monkeypatch, tmp_path):
-    """FIX 1: if the live session would co-upload a secret, submit_begin REFUSES
+    """If the live session would co-upload a secret, submit_begin REFUSES
     (default) and recommends checkpoint."""
     sid, path, _ = seeded
     # A separate live session file carrying a planted key.
@@ -208,9 +208,9 @@ def test_submit_begin_refuses_dirty_live_session(seeded, monkeypatch, tmp_path):
 
 
 def test_submit_begin_refuses_content_rich_live_session(seeded, monkeypatch, tmp_path):
-    """M1: a live session with NO secret/PII-floor hit but rich in file contents / paths /
-    cwd+gitBranch must still trip the gather-gate — the old secret-only floor cleared it
-    and let it upload raw. The deterministic leak-scan (paths + env) now catches it."""
+    """A live session with NO secret/PII-floor hit but rich in file contents / paths /
+    cwd+gitBranch must still trip the gather-gate — a secret-only floor would clear it
+    and let it upload raw. The deterministic leak-scan (paths + env) catches it."""
     sid, path, _ = seeded
     live = tmp_path / "live-content-1234.jsonl"
     live.write_text(
@@ -232,7 +232,7 @@ def test_submit_begin_refuses_content_rich_live_session(seeded, monkeypatch, tmp
 
 
 def test_submit_begin_fails_closed_when_live_unresolved(seeded):
-    """#2: when no live session id can be resolved (skill didn't pass it AND no env id),
+    """When no live session id can be resolved (skill didn't pass it AND no env id),
     submit_begin must NOT assume the live session is clean — it fails closed and asks for
     the id or a checkpoint, rather than staging an unscanned raw co-upload."""
     sid, path, _ = seeded  # the seeded fixture's resolve returns live_session_id=None
@@ -246,7 +246,7 @@ def test_submit_begin_fails_closed_when_live_unresolved(seeded):
 
 
 def test_relevant_slice_rejects_empty_needle(seeded):
-    """S1: an empty/whitespace needle matches every record (`'' in text` is always
+    """An empty/whitespace needle matches every record (`'' in text` is always
     true) — it must be rejected, not return the whole transcript."""
     sid, _, _ = seeded
     out = M.relevant_slice(sid, "   ")

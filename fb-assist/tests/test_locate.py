@@ -11,8 +11,8 @@ Coverage:
   * ``$CLAUDE_CODE_SESSION_ID`` is used when no id is passed;
   * newest-first fallback when neither is present;
   * ``is_live`` via session-id IDENTITY even when ``is_being_written`` is False
-    (the FIX-3 case) — and identity short-circuits the heuristic entirely;
-  * account derivation (work / personal / michelle / custom);
+    — identity short-circuits the heuristic entirely;
+  * account derivation (work / a named account suffix / custom);
   * graceful empty result when the dir doesn't exist.
 """
 
@@ -174,7 +174,7 @@ def test_fallback_is_live_uses_heuristic(env, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# FIX-3: identity beats the heuristic                                          #
+# Identity beats the heuristic                                                 #
 # --------------------------------------------------------------------------- #
 def test_is_live_identity_beats_false_heuristic(env, monkeypatch):
     # The crux: is_being_written says False (per-turn false-negative), yet the
@@ -196,9 +196,9 @@ def test_is_live_identity_beats_false_heuristic(env, monkeypatch):
     "dirname, expected",
     [
         (".claude", "work"),
-        (".claude-personal", "personal"),
-        (".claude-michelle", "michelle"),
-        (".claude-weird", "custom"),
+        (".claude-acme", "acme"),
+        (".claude-beta", "beta"),
+        ("claude-nodot", "custom"),
     ],
 )
 def test_account_derivation(tmp_path, monkeypatch, dirname, expected):
